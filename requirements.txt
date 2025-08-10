@@ -1,0 +1,33 @@
+# --- Core LLM/RAG Frameworks ---
+langchain==0.3.27
+langgraph==0.6.4
+llama-index==0.13.1
+
+# --- LLM & Embedding Models ---
+llama-index-llms-gemini==0.6.0
+llama-index-embeddings-google-genai==0.3.0
+
+# --- Vector Database & Search ---
+qdrant-client==1.15.1
+llama-index-vector-stores-qdrant==0.7.1
+tavily-python==0.7.10
+langchain-community==0.3.27
+fastembed==0.7.1
+
+# --- Data Parsing ---
+unstructured[pdf]==0.18.11
+
+# --- Data Validation ---
+pydantic==2.11.7
+
+
+# --- Setting Management ---
+python-dotenv==1.1.1
+pydantic-settings==2.10.1
+
+# --- Web Framework for API ---
+fastapi
+uvicorn
+
+# --- UI Framework (if backend serves it) ---
+gradio==5.41.0
