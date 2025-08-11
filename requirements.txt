@@ -4,7 +4,7 @@ langgraph==0.6.4
 llama-index==0.13.1
 
 # --- LLM & Embedding Models ---
-llama-index-llms-gemini==0.6.0
+llama-index-llms-google-genai 
 llama-index-embeddings-google-genai==0.3.0
 
 # --- Vector Database & Search ---

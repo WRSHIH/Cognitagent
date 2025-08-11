@@ -1,0 +1,54 @@
+from dotenv import load_dotenv
+from pydantic import SecretStr, HttpUrl
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 在所有程式碼執行之前，先執行 load_dotenv()
+# 這會將 .env 檔案中的鍵值對載入到系統的環境變數中
+# 如果環境中已存在同名變數，預設不會覆寫，這正是我們想要的行為
+load_dotenv()
+
+# 告訴 Pydantic 從 .env 檔案讀取設定
+class Settings(BaseSettings):
+    """
+    應用程式的集中設定管理類別。
+    Pydantic 會自動從環境變數或 .env 檔案中讀取對應的欄位。
+    """
+    # --------------------------------------------------------------------------
+    # 必要金鑰 (Secrets) - 使用 SecretStr 類型來保護，避免在日誌中意外洩漏
+    # --------------------------------------------------------------------------
+    GOOGLE_API_KEY: SecretStr
+    QDRANT_API_KEY: SecretStr
+    TAVILY_API_KEY: SecretStr
+
+    # --------------------------------------------------------------------------
+    # 資料庫與服務設定
+    # --------------------------------------------------------------------------
+    QDRANT_URL: HttpUrl
+
+    # --------------------------------------------------------------------------
+    # 模型設定 (將原本寫死的模型名稱變成可設定的)
+    # --------------------------------------------------------------------------
+    GEMINI_FLASH: str
+    GEMINI_PRO: str
+    GEMINI_EMBED: str
+
+    # --------------------------------------------------------------------------
+    # RAG 檢索相關設定
+    # --------------------------------------------------------------------------
+    HYBRID_SEARCH_ALPHA: float = 0.5
+    SIMILARITY_TOP_K: int = 5
+    SPARSE_TOP_K: int = 5
+
+    # --------------------------------------------------------------------------
+    # 知識回寫相關設定
+    # --------------------------------------------------------------------------
+    KNOWLEDGE_SIMILARITY_THRESHOLD: float = 0.95
+
+
+    # Pydantic V2 的設定方式，指定 .env 檔案的編碼
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', case_sensitive=False)
+
+
+# 建立一個全域可用的設定實例
+# 應用程式的其他部分應該 import 這個 settings 物件來使用
+settings = Settings() # type: ignore
