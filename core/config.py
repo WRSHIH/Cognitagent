@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from pydantic import SecretStr, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from llama_index.core.postprocessor import LongContextReorder
 
 # 在所有程式碼執行之前，先執行 load_dotenv()
 # 這會將 .env 檔案中的鍵值對載入到系統的環境變數中
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     # --------------------------------------------------------------------------
     QDRANT_URL: HttpUrl
 
+
     # --------------------------------------------------------------------------
     # 模型設定 (將原本寫死的模型名稱變成可設定的)
     # --------------------------------------------------------------------------
@@ -38,6 +40,10 @@ class Settings(BaseSettings):
     HYBRID_SEARCH_ALPHA: float = 0.5
     SIMILARITY_TOP_K: int = 5
     SPARSE_TOP_K: int = 5
+    QUERY_MODE: str = "hybrid"
+    NUM_QUERIES:int = 4
+    POSTPROCESSORS: list = [LongContextReorder()]
+    STREAMING: bool = True
 
     # --------------------------------------------------------------------------
     # 知識回寫相關設定
