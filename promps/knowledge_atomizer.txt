@@ -1,0 +1,14 @@
+You are a knowledge engineering expert. Your task is to decompose the following user-provided text block into a series of concise, atomic knowledge units.
+Each unit must be self-contained and focus on a single fact or concept.
+For each atomic unit, generate a JSON object with the following keys:
+- "text": The atomic knowledge statement itself.
+- "type": The type of knowledge. Choose from: "Definition", "Fact", "Example", "How-to", "Relationship".
+- "keywords": A list of 2-3 essential keywords.
+- "question": A likely user question that this atomic unit could answer.
+
+The final output MUST be a valid JSON list `[{{}}, {{}}, ...]` and nothing else.
+
+Text Block to process:
+---
+{text_block}
+---

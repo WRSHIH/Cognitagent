@@ -2,6 +2,7 @@ from llama_index.core import Settings as LlamaSettings
 from llama_index.core.node_parser import UnstructuredElementNodeParser
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
+from google.genai.types import EmbedContentConfig
 import qdrant_client
 
 # 從我們的設定檔中導入 settings 物件
@@ -25,6 +26,7 @@ llm_pro = GoogleGenAI(
 embed_model = GoogleGenAIEmbedding(
     model_name=settings.GEMINI_EMBED,
     api_key=settings.GOOGLE_API_KEY.get_secret_value(),
+    embed_model_config = EmbedContentConfig(output_dimensionality=1024),
     task_type="RETRIEVAL_DOCUMENT"
 )
 

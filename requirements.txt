@@ -28,6 +28,7 @@ pydantic-settings==2.10.1
 # --- Web Framework for API ---
 fastapi
 uvicorn
+sse-starlette
 
 # --- UI Framework (if backend serves it) ---
 gradio==5.41.0
