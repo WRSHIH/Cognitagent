@@ -36,3 +36,4 @@ gradio==5.41.0
 
 # --- Unit/Integration Tests ---
 pytest
+pytest-mock
