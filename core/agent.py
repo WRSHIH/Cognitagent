@@ -5,9 +5,10 @@ from typing import TypedDict, Annotated, List
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import AIMessage
 
 # 導入我們集中管理的 LLM 服務和工具列表
-from core.services import llm_pro
+from core.services import get_langchain_gemini_pro
 from core.tool_registry import ALL_TOOLS
 
 # --- 1. 定義 Agent 的狀態 (State) ---
@@ -19,7 +20,8 @@ class AgentState(TypedDict):
 
 
 # --- 2. 定義圖中的節點 (Nodes) ---
-llm_with_tools = llm_pro.bind_tools(ALL_TOOLS)
+
+llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
 
 def agent_node(state: AgentState) -> dict:
     """
@@ -30,7 +32,7 @@ def agent_node(state: AgentState) -> dict:
     logging.info("---[Agent Node]: Thinking...")
     response_message = llm_with_tools.invoke(state['messages'])
     print(f"--- Agent 決策: {response_message.content} ---")
-    if response_message.tool_calls:
+    if isinstance(response_message, AIMessage) and response_message.tool_calls:
         print(f"--- 準備執行工具: {response_message.tool_calls} ---")
         logging.info(f"--- [Agent Node]: Decision made. Tool calls: {bool(response_message.tool_calls)} ---")
     else:

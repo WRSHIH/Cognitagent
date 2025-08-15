@@ -1,9 +1,12 @@
+from functools import lru_cache
 from llama_index.core import Settings as LlamaSettings
 from llama_index.core.node_parser import UnstructuredElementNodeParser
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from google.genai.types import EmbedContentConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
 import qdrant_client
+import logging
 
 # 從我們的設定檔中導入 settings 物件
 from .config import settings
@@ -11,36 +14,46 @@ from .config import settings
 # --- LLM 和 Embedding 服務初始化 ---
 
 # 初始化 LLM
-llm_flash = GoogleGenAI(
-    model_name=settings.GEMINI_FLASH,
-    api_key=settings.GOOGLE_API_KEY.get_secret_value()
-)
+@lru_cache(maxsize=None)
+def get_llama_gemini_flash():
+    logging.info('首次初始化 Gemini 2.5 Flash...')
+    return GoogleGenAI(
+        model_name=settings.GEMINI_FLASH,
+        api_key=settings.GOOGLE_API_KEY.get_secret_value()
+    )
 
-llm_pro = GoogleGenAI(
-    model_name=settings.GEMINI_PRO,
-    api_key=settings.GOOGLE_API_KEY.get_secret_value()
-)
-
+@lru_cache(maxsize=None)
+def get_langchain_gemini_pro():
+    logging.info('首次初始化 Gemini 2.5 Pro...')
+    return ChatGoogleGenerativeAI(
+        model_name=settings.GEMINI_PRO,
+        api_key=settings.GOOGLE_API_KEY.get_secret_value()
+    )
 
 # 初始化 Embedding 模型
-embed_model = GoogleGenAIEmbedding(
-    model_name=settings.GEMINI_EMBED,
-    api_key=settings.GOOGLE_API_KEY.get_secret_value(),
-    embed_model_config = EmbedContentConfig(output_dimensionality=1024),
-    task_type="RETRIEVAL_DOCUMENT"
-)
+@lru_cache(maxsize=None)
+def get_llama_gemini_embed():
+    logging.info('首次初始化 Embedding Model...')
+    return GoogleGenAIEmbedding(
+        model_name=settings.GEMINI_EMBED,
+        api_key=settings.GOOGLE_API_KEY.get_secret_value(),
+        embed_model_config = EmbedContentConfig(output_dimensionality=1024),
+        task_type="RETRIEVAL_DOCUMENT"
+    )
 
 # --- LlamaIndex 全域背景設定 ---
-LlamaSettings.llm = llm_flash
-LlamaSettings.embed_model = embed_model
-LlamaSettings.node_parser = UnstructuredElementNodeParser(llm=llm_flash)
+def configure_llama_index_settings():
+    logging.info("設定 LlamaIndex 全域參數...")
+    LlamaSettings.llm = get_llama_gemini_flash()
+    LlamaSettings.embed_model = get_llama_gemini_embed()
+    LlamaSettings.node_parser = UnstructuredElementNodeParser(llm=get_llama_gemini_flash())
 
 
 # --- 外部服務客戶端初始化 ---
-# 初始化 Qdrant 客戶端
-qdrant_client_instance = qdrant_client.QdrantClient(
-    url=str(settings.QDRANT_URL), # HttpUrl 類型需轉為字串
-    api_key=settings.QDRANT_API_KEY.get_secret_value()
-)
-
-print("✅ Services initialized and LlamaIndex settings configured successfully.")
+@lru_cache(maxsize=None)
+def get_qdrant_client():
+    logging.info("首次初始化 Qdrant Client...")
+    return qdrant_client.QdrantClient(
+        url=str(settings.QDRANT_URL), # HttpUrl 類型需轉為字串
+        api_key=settings.QDRANT_API_KEY.get_secret_value()
+    )

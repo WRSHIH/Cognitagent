@@ -2,7 +2,6 @@ import datetime
 import json
 import logging
 from typing import List, Dict, Any
-from pathlib import Path
 
 from langchain.tools import Tool
 from llama_index.core import Document
@@ -11,9 +10,10 @@ from llama_index.core import Document
 from core.utils import load_prompt
 
 # 導入 rag_tool 中已經建立好的 index 物件，以供重複使用
-from .rag_tool import index
+from .rag_tool import get_index
+
 # 導入集中管理的 LLM 服務與設定
-from core.services import llm_flash
+from core.services import get_llama_gemini_flash
 from core.config import settings
 
 # --- 使用輔助函式載入 Prompt，程式碼更簡潔 ---
@@ -35,7 +35,7 @@ def merge_knowledge_with_llm(old_text: str, new_text: str) -> str:
     """
     merger_prompt = MERGER_PROMPT_TEMPLATE.format(old_text=old_text, new_text=new_text)
     try:
-        response = llm_flash.complete(merger_prompt)
+        response = get_llama_gemini_flash().complete(merger_prompt)
         return response.text.strip()
     except Exception as e:
         logging.error(f"智能合併時發生錯誤：{e}")
@@ -63,7 +63,7 @@ def atomize_knowledge(text_block: str) -> List[Dict[str, Any]]:
     """
     atomizer_prompt = ATOMIZER_PROMPT_TEMPLATE.format(text_block=text_block)
     try:
-        response = llm_flash.complete(atomizer_prompt)
+        response = get_llama_gemini_flash().complete(atomizer_prompt)
         # 移除 ```json 和 ```
         cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
         return json.loads(cleaned_response)
@@ -89,8 +89,8 @@ def save_new_knowledge(knowledge_text: str) -> str:
         return "知識原子化失敗，未儲存任何內容。"
     logging.info(f"原子化後的知識單元數量: {len(atomic_units)}")
 
-    SIMILARITY_THRESHOLD = settings.SIMILARITY_THRESHOLD  # 從設定中獲取相似度閾值
-    retriever = index.as_retriever(similarity_top_k=1)    # 建立搜索器 確認知識內容是否已存在
+    SIMILARITY_THRESHOLD = settings.KNOWLEDGE_SIMILARITY_THRESHOLD  # 從設定中獲取相似度閾值
+    retriever = get_index().as_retriever(similarity_top_k=1)    # 建立搜索器 確認知識內容是否已存在
     nodes_to_delete = set()                 # 使用 set 來追蹤需要刪除的 node_id，避免重複刪除
     documents_to_insert = []                # 紀錄需要更新的文件
     stats = {"new": 0, "updated": 0, "skipped": 0}
@@ -140,10 +140,10 @@ def save_new_knowledge(knowledge_text: str) -> str:
     try:
         if nodes_to_delete:
             logging.info(f"正在從資料庫中刪除 {len(nodes_to_delete)} 個過時節點...")
-            index.delete_nodes(list(nodes_to_delete))
+            get_index().delete_nodes(list(nodes_to_delete))
         if documents_to_insert:
             logging.info(f"正在向資料庫中寫入 {len(documents_to_insert)} 個新/更新節點...")
-            index.insert_nodes(documents_to_insert)
+            get_index().insert_nodes(documents_to_insert)
 
         final_message = (
             f"知識進化流程完成！\n"

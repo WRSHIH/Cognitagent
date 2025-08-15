@@ -2,9 +2,10 @@ import argparse
 import logging
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+from qdrant_client.models import VectorParams, Distance
 
 
-from core.services import qdrant_client_instance, LlamaSettings
+from core.services import get_qdrant_client, LlamaSettings
 from core.config import settings
 
 # 設定日誌記錄
@@ -25,16 +26,16 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
     if recreate:
         logging.warning(f"偵測到 --recreate 參數，準備刪除集合: '{collection_name}'")
         try:
-            qdrant_client_instance.delete_collection(collection_name=collection_name)
+            get_qdrant_client().delete_collection(collection_name=collection_name)
             logging.info(f"集合 '{collection_name}' 刪除成功。")
         except Exception as e:
             # 如果集合不存在，刪除會失敗，這是正常現象
             logging.warning(f"嘗試刪除集合 '{collection_name}' 失敗 (可能尚不存在): {e}")
 
         # 即使刪除失敗也要嘗試重新建立，以防萬一
-        qdrant_client_instance.recreate_collection(
+        get_qdrant_client().recreate_collection(
             collection_name=collection_name,
-            vectors_config={"size": 1024, "distance": "Cosine"}
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
         )
         logging.info(f"集合 '{collection_name}' 重新建立成功。")
 
@@ -59,7 +60,7 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
     logging.info("開始建立索引並將資料存入 Qdrant，此過程可能需要一些時間...")
 
     vector_store = QdrantVectorStore(
-        client=qdrant_client_instance,
+        client=get_qdrant_client(),
         collection_name=collection_name,
         enable_hybrid=True  # 啟用混合搜尋
     )

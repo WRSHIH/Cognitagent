@@ -6,6 +6,7 @@ llama-index==0.13.1
 # --- LLM & Embedding Models ---
 llama-index-llms-google-genai 
 llama-index-embeddings-google-genai==0.3.0
+langchain-google-genai==2.1.9
 
 # --- Vector Database & Search ---
 qdrant-client==1.15.1
@@ -37,3 +38,4 @@ gradio==5.41.0
 # --- Unit/Integration Tests ---
 pytest
 pytest-mock
+pytest-dotenv
