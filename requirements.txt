@@ -41,3 +41,4 @@ pytest
 pytest-mock
 pytest-dotenv
 pytest-asyncio
+pytest-playwright

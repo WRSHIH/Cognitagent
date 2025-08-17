@@ -90,3 +90,35 @@ def test_chat_stream_agent_error(client, mocker):
     
     assert last_event['type'] == 'error'
     assert last_event['message'] == error_msg
+
+def test_chat_stream_validation_missing_message(client):
+    """
+    整合測試：驗證當請求缺少必要的 'message' 欄位時，
+    API (透過 Pydantic) 是否會回傳 422 錯誤。
+    """
+    # 準備一個不合法的請求 payload (缺少 message)
+    invalid_payload = {
+        "thread_id": "some-thread-id"
+    }
+
+    # 執行並斷言
+    response = client.post("/api/v1/chat/stream", json=invalid_payload)
+    
+    # FastAPI 在 Pydantic 驗證失敗時，會自動回傳 422 Unprocessable Entity
+    assert response.status_code == 422
+
+def test_chat_stream_validation_wrong_message_type(client):
+    """
+    整合測試：驗證當 'message' 欄位的型別錯誤時，
+    API (透過 Pydantic) 是否會回傳 422 錯誤。
+    """
+    # 準備一個不合法的請求 payload (message 是數字而非字串)
+    invalid_payload = {
+        "message": 12345,
+        "thread_id": "some-thread-id"
+    }
+
+    # 執行並斷言
+    response = client.post("/api/v1/chat/stream", json=invalid_payload)
+    
+    assert response.status_code == 422
