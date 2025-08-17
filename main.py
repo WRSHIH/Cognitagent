@@ -63,7 +63,7 @@ async def chat_stream(request: ChatRequest):
             yield json.dumps({"type": "thread_id", "id": thread_id})
 
             # 非同步地迭代 Agent 的執行事件
-            async for event in agent_executable.astream_events(inputs, config=config, version="v1"):
+            async for event in agent_executable.astream_events(inputs, config=config, version="v1"): # pyright: ignore[reportArgumentType]
                 event_type = event['event']
                 payload = {"type": event_type, "data": event['data']}
 

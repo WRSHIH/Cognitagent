@@ -26,7 +26,7 @@ def get_llama_gemini_flash():
 def get_langchain_gemini_pro():
     logging.info('首次初始化 Gemini 2.5 Pro...')
     return ChatGoogleGenerativeAI(
-        model_name=settings.GEMINI_PRO,
+        model=settings.GEMINI_PRO,
         api_key=settings.GOOGLE_API_KEY.get_secret_value()
     )
 

@@ -48,13 +48,17 @@ def should_continue(state: AgentState) -> str:
     """
     條件判斷邊 (Conditional Edge)：決定流程應該結束還是繼續呼叫工具。
     """
-    last_message = state['messages'][-1]
-    if not last_message.tool_calls:
-        logging.info("---[Conditional Edge]: No tool call, ending graph.")
+    if not state['messages']:
         return "end"
-    else:
+
+    last_message = state['messages'][-1]
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
         logging.info("---[Conditional Edge]: Tool call detected, continuing to tools node.")
         return "continue"
+    else:
+        # 如果不是 AIMessage，或者 AIMessage 裡沒有 tool_calls，就結束
+        logging.info("---[Conditional Edge]: No tool call, ending graph.")
+        return "end"
 
 
 # --- 3. 建立工廠函式 (Factory Function) ---
