@@ -1,11 +1,13 @@
 import argparse
 import logging
+import time
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client.models import VectorParams, Distance
+from qdrant_client import models
 
 
-from core.services import get_qdrant_client, LlamaSettings
+from core.services import get_qdrant_client, LlamaSettings, configure_llama_index_settings
 from core.config import settings
 
 # 設定日誌記錄
@@ -21,6 +23,9 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
         recreate (bool): 是否要刪除已存在的集合並重新建立。
     """
     logging.info(f"開始資料導入流程，來源: '{source_dir}'")
+    logging.info("正在設定 LlamaIndex 全域參數...")
+    configure_llama_index_settings()
+    logging.info("LlamaIndex 設定完成。")
 
 
     if recreate:
@@ -35,8 +40,11 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
         # 即使刪除失敗也要嘗試重新建立，以防萬一
         get_qdrant_client().recreate_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
-        )
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+            sparse_vectors_config={
+                                    "text-sparse": models.SparseVectorParams(index=
+                                                                             models.SparseIndexParams(on_disk=False,))}
+                                                                             )
         logging.info(f"集合 '{collection_name}' 重新建立成功。")
 
 
@@ -66,14 +74,23 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
     )
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    VectorStoreIndex.from_documents(
-        documents,
-        storage_context=storage_context,
-        show_progress=True, # 在終端顯示進度條
-        llm=LlamaSettings.llm,
-        embed_model=LlamaSettings.embed_model,
-        node_parser=LlamaSettings.node_parser
-    )
+    chunk_size = 10
+    for i in range(0, len(documents), chunk_size):
+        doc_chunk = documents[i:i + chunk_size]
+        logging.info(f"--- 正在處理第 {i // chunk_size + 1} 批文件 (文件索引 {i} 到 {i + len(doc_chunk) - 1}) ---")
+        VectorStoreIndex.from_documents(
+            doc_chunk,
+            storage_context=storage_context,
+            show_progress=False,
+            llm=LlamaSettings.llm,
+            embed_model=LlamaSettings.embed_model,
+            node_parser=LlamaSettings.node_parser
+        )
+        logging.info(f"--- 第 {i // chunk_size + 1} 批文件處理完成 ---")
+
+        if i + chunk_size < len(documents):
+            logging.warning("API 速率限制：將暫停 61 秒，等待額度重置...")
+            time.sleep(61)
 
     logging.info("✅ 資料導入流程成功完成！")
 
@@ -84,7 +101,7 @@ if __name__ == '__main__':
         "--source-dir",
         type=str,
         required=True,
-        help="包含原始文件的來源資料夾路徑 (例如: ./data/source_docs)。"
+        help="包含原始文件的來源資料夾路徑 (例如: ./source_docs)。"
     )
     parser.add_argument(
         "--collection",
