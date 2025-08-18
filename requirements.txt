@@ -15,7 +15,6 @@ tavily-python==0.7.10
 langchain-tavily=0.2.11
 langchain-community==0.3.27  #
 fastembed==0.7.1
-llama-index-sparse-embeddings-fastembed==0.3.0
 
 # --- Data Parsing ---
 unstructured[pdf]==0.18.11

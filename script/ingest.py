@@ -3,9 +3,7 @@ import logging
 import time
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from qdrant_client.models import VectorParams, Distance
-from qdrant_client import models
-
+from qdrant_client.models import VectorParams, Distance, SparseVectorParams, SparseIndexParams
 
 from core.services import get_qdrant_client, LlamaSettings, configure_llama_index_settings
 from core.config import settings
@@ -40,11 +38,9 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
         # 即使刪除失敗也要嘗試重新建立，以防萬一
         get_qdrant_client().recreate_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
-            sparse_vectors_config={
-                                    "text-sparse": models.SparseVectorParams(index=
-                                                                             models.SparseIndexParams(on_disk=False,))}
-                                                                             )
+            vectors_config=VectorParams(size=settings.DENSE_VECTOR_SIZE, distance=Distance.COSINE),
+            sparse_vectors_config= {"SPARSE_VECTOR_NAME": SparseVectorParams(index=SparseIndexParams(on_disk=False))}
+                                                )
         logging.info(f"集合 '{collection_name}' 重新建立成功。")
 
 
@@ -70,11 +66,12 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
     vector_store = QdrantVectorStore(
         client=get_qdrant_client(),
         collection_name=collection_name,
-        enable_hybrid=True  # 啟用混合搜尋
+        enable_hybrid=True,
+        vectors_config=VectorParams(size=settings.DENSE_VECTOR_SIZE, distance=Distance.COSINE)
     )
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    chunk_size = 10
+    chunk_size = 1
     for i in range(0, len(documents), chunk_size):
         doc_chunk = documents[i:i + chunk_size]
         logging.info(f"--- 正在處理第 {i // chunk_size + 1} 批文件 (文件索引 {i} 到 {i + len(doc_chunk) - 1}) ---")
@@ -84,13 +81,13 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
             show_progress=False,
             llm=LlamaSettings.llm,
             embed_model=LlamaSettings.embed_model,
-            node_parser=LlamaSettings.node_parser
+            node_parser=LlamaSettings.node_parser,
         )
         logging.info(f"--- 第 {i // chunk_size + 1} 批文件處理完成 ---")
 
         if i + chunk_size < len(documents):
-            logging.warning("API 速率限制：將暫停 61 秒，等待額度重置...")
-            time.sleep(61)
+            logging.warning("API 速率限制：將暫停 1 秒，等待額度重置...")
+            time.sleep(1)
 
     logging.info("✅ 資料導入流程成功完成！")
 

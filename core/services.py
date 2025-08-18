@@ -3,7 +3,6 @@ from llama_index.core import Settings as LlamaSettings
 from llama_index.core.node_parser import UnstructuredElementNodeParser
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
-# from llama_index.sparse_embeddings.fastembed import FastEmbedSparseEmbedding
 from google.genai.types import EmbedContentConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 import qdrant_client
@@ -38,7 +37,7 @@ def get_llama_gemini_embed():
     return GoogleGenAIEmbedding(
         model_name=settings.GEMINI_EMBED,
         api_key=settings.GOOGLE_API_KEY.get_secret_value(),
-        embed_model_config = EmbedContentConfig(output_dimensionality=1024),
+        embed_model_config = EmbedContentConfig(output_dimensionality=settings.DIMENSION),
         task_type="RETRIEVAL_DOCUMENT",
         embed_batch_size=1,
     )
