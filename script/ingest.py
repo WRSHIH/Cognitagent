@@ -39,7 +39,7 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
         get_qdrant_client().recreate_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=settings.DENSE_VECTOR_SIZE, distance=Distance.COSINE),
-            sparse_vectors_config= {"SPARSE_VECTOR_NAME": SparseVectorParams(index=SparseIndexParams(on_disk=False))}
+            sparse_vectors_config= {"text-sparse-new": SparseVectorParams(index=SparseIndexParams(on_disk=False))}
                                                 )
         logging.info(f"集合 '{collection_name}' 重新建立成功。")
 

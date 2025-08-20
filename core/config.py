@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     GEMINI_FLASH: str
     GEMINI_PRO: str
     GEMINI_EMBED: str
-    DIMENSION:int = 1024
+    GEMINI_DIMENSION:int = 1024
 
 
     # llamaindex 檢索相關設定
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     STREAMING: bool = True
 
     # Qdrant 檢索相關設定
-    DENSE_VECTOR_SIZE: int = 3072
+    DENSE_VECTOR_SIZE: int = 1024
 
     # 知識回寫相關設定
     KNOWLEDGE_SIMILARITY_THRESHOLD: float = 0.95
