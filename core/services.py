@@ -3,7 +3,7 @@ from llama_index.core import Settings as LlamaSettings
 from llama_index.core.node_parser import UnstructuredElementNodeParser
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
-from google.genai.types import EmbedContentConfig
+from google.genai import types
 from langchain_google_genai import ChatGoogleGenerativeAI
 import qdrant_client
 import logging
@@ -37,7 +37,7 @@ def get_llama_gemini_embed():
     return GoogleGenAIEmbedding(
         model_name=settings.GEMINI_EMBED,
         api_key=settings.GOOGLE_API_KEY.get_secret_value(),
-        embed_model_config = EmbedContentConfig(output_dimensionality=settings.DIMENSION),
+        embedding_config=types.EmbedContentConfig(output_dimensionality=3072),
         task_type="RETRIEVAL_DOCUMENT",
         embed_batch_size=1,
     )
@@ -59,3 +59,10 @@ def get_qdrant_client():
         url=str(settings.QDRANT_URL), # HttpUrl 類型需轉為字串
         api_key=settings.QDRANT_API_KEY.get_secret_value()
     )
+
+
+if __name__ == '__main__':
+    from services import get_llama_gemini_embed
+    embeddings = get_llama_gemini_embed().get_text_embedding("Google Gemini Embeddings.")
+    print(f"生成的向量維度: {len(embeddings)}")
+    

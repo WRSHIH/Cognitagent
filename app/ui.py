@@ -4,7 +4,7 @@ import json
 import uuid
 
 # 後端 API 的位址
-API_URL = "http://127.0.0.1:8000/api/v1/chat/stream"
+API_URL = "http://127.0.0.1:8080/api/v1/chat/stream"
 
 def format_log_message(event_data: dict) -> str:
     """將從 API 收到的事件資料格式化為人類可讀的日誌訊息。"""

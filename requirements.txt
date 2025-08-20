@@ -22,7 +22,6 @@ unstructured[pdf]==0.18.11
 # --- Data Validation ---
 pydantic==2.11.7
 
-
 # --- Setting Management ---
 python-dotenv==1.1.1
 pydantic-settings==2.10.1

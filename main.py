@@ -4,6 +4,8 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
+from langchain_core.messages import BaseMessage
+from langchain_core.prompt_values import ChatPromptValue 
 
 # 導入我們之前建立的 Agent 工廠函式和資料模型
 from core.agent import create_agent_graph
@@ -21,7 +23,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 在生產環境中應指定前端的具體來源
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -30,21 +32,35 @@ app.add_middleware(
 agent_executable = create_agent_graph()
 
 
-# --- API 端點 (Endpoint) 定義 ---
+# --- 新增一個輔助函式來轉換資料 ---
+def convert_docs_to_dict(docs):
+    """
+    一個更通用的輔助函式，將任何繼承自 BaseMessage 的 LangChain 物件轉換為可序列化的字典。
+    """
+    # 只要是 LangChain 的 Message 物件
+    if isinstance(docs, BaseMessage): 
+        return {"type": docs.type, "content": docs.content}
+    if isinstance(docs, ChatPromptValue):
+        return convert_docs_to_dict(docs.to_messages())
+    # 如果是列表，遞迴處理裡面的每個元素
+    if isinstance(docs, list):
+        return [convert_docs_to_dict(doc) for doc in docs]
+    # 如果是字典，遞迴處理裡面的每個值
+    if isinstance(docs, dict):
+        return {key: convert_docs_to_dict(value) for key, value in docs.items()}
+    # 如果是其他基本類型，直接返回
+    return docs
 
+
+# --- API 端點 (Endpoint) 定義 ---
 @app.post("/api/v1/chat/stream")
 async def chat_stream(request: ChatRequest):
     """
-    接收使用者訊息，並透過 Server-Sent Events (SSE) 串流方式回傳 Agent 的執行過程。
-    :param request: 包含使用者訊息和可選的 thread_id
-    :return: Server-Sent Events (SSE) 串流回應
-    這個端點會處理來自前端的聊天請求，並使用 Server-Sent Events (SSE) 串流 Agent 的回應。
     當前端發送一個聊天請求時，這個端點會啟動 Agent 的執行過程，
     並將 Agent 的回應以串流的方式發送回前端。
     如果請求中沒有提供 thread_id，則會自動生成一個新的 UUID 作為 thread_id。
     串流的過程中，會將 Agent 的事件格式化為 SSE 事件，
     並在串流結束時發送結束事件。
-    如果在串流過程中發生錯誤，則會捕獲異常並將錯誤訊息發送回前端。
     """
     thread_id = request.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -56,7 +72,6 @@ async def chat_stream(request: ChatRequest):
         這個產生器會在串流開始時發送 thread_id，然後持續接收 Agent 的事件，
         並將這些事件格式化為 JSON 格式的 SSE 事件發送給前端。
         當 Agent 的執行結束時，會發送一個結束事件。
-        如果在串流過程中發生錯誤，則會捕獲異常並將錯誤訊息發送回前端。
         """
         try:
             # 首次發送 thread_id 給前端
@@ -65,14 +80,15 @@ async def chat_stream(request: ChatRequest):
             # 非同步地迭代 Agent 的執行事件
             async for event in agent_executable.astream_events(inputs, config=config, version="v1"): # pyright: ignore[reportArgumentType]
                 event_type = event['event']
-                payload = {"type": event_type, "data": event['data']}
+                serializable_data = convert_docs_to_dict(event['data'])
+                payload = {"type": event_type, "data": serializable_data}
 
                 # 我們只串流結束事件，以簡化前端處理
                 if event_type.endswith('_end'):
                     yield json.dumps(payload)
 
         except Exception as e:
-            logging.error(f"串流時發生錯誤: {e}")
+            logging.error(f"串流時發生錯誤: {e}", exc_info=True)
             yield json.dumps({"type": "error", "message": str(e)})
 
     return EventSourceResponse(event_generator(), media_type="text/event-stream")
