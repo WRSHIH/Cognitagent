@@ -86,7 +86,7 @@ def run_ingestion(source_dir: str, collection_name: str, recreate: bool):
         logging.info(f"--- 第 {i // chunk_size + 1} 批文件處理完成 ---")
 
         if i + chunk_size < len(documents):
-            logging.warning("API 速率限制：將暫停 1 秒，等待額度重置...")
+            # logging.warning("API 速率限制：將暫停 1 秒，等待額度重置...")
             time.sleep(1)
 
     logging.info("✅ 資料導入流程成功完成！")

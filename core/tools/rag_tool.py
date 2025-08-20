@@ -48,8 +48,9 @@ def run_deep_research(query: str) -> str:
 DeepResearchKnowledgeBase = Tool(
     name="DeepResearchKnowledgeBase",
     func=run_deep_research,
-    description="""一個深度研究工具，專門用於查詢和回答關於「臨床試驗設計」、「藥物開發流程」、以及「GCP規範」等專業領域的內部知識庫。
-                 當使用者的問題涉及臨床試驗的具體執行細節、法規遵循或內部流程時，必須優先使用此工具。"""
+    description="""一個專門的AI前沿技術知識庫，集中存放關於大型語言模型（LLM）、生成式AI及相關領域的最新研究論文、技術報告、專案文件或基準測試結果。
+當使用者詢問特定AI模型（例如：Rubicon, Matrix-Game 2.0）、評測基準（例如：OptimalThinkingBench）、或新穎的演算法與訓練方法（例如：使用標題錨點的強化學習）的技術細節時，應使用此工具。
+此工具能深入回答關於特定技術的原理、架構設計、實驗數據、核心貢獻與挑戰等專業問題。"""
 )
 
 if __name__ == "__main__":

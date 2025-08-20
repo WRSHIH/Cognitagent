@@ -30,10 +30,10 @@ def get_langchain_gemini_pro():
         model=settings.GEMINI_PRO,
         api_key=settings.GOOGLE_API_KEY.get_secret_value(),
         safety_settings={
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
     )
 
@@ -69,7 +69,7 @@ def get_qdrant_client():
 
 
 if __name__ == '__main__':
-    # from services import get_llama_gemini_embed
-    embeddings = get_llama_gemini_embed().get_text_embedding("Google Gemini Embeddings.")
-    print(f"生成的向量維度: {len(embeddings)}")
+    # embeddings = get_llama_gemini_embed().get_text_embedding("Google Gemini Embeddings.")
+    # print(f"生成的向量維度: {len(embeddings)}")
+    print(get_langchain_gemini_pro().invoke('你好'))
     
