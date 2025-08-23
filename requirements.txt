@@ -6,13 +6,14 @@ llama-index==0.13.1
 # --- LLM & Embedding Models ---
 llama-index-llms-google-genai 
 llama-index-embeddings-google-genai==0.3.0
-langchain-google-genai==2.1.9
+langchain-google-genai==2.0.10
+google-generativeai==0.8.5
 
 # --- Vector Database & Search ---
 qdrant-client==1.15.1
 llama-index-vector-stores-qdrant==0.7.1
 tavily-python==0.7.10
-langchain-tavily=0.2.11
+langchain-tavily==0.2.11
 langchain-community==0.3.27  #
 fastembed==0.7.1
 

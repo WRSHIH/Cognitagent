@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     """
     
     # 必要金鑰 (Secrets) 
-    GOOGLE_API_KEY: SecretStr
+    GEMINI_API_KEY: SecretStr
     QDRANT_API_KEY: SecretStr
     TAVILY_API_KEY: SecretStr
 

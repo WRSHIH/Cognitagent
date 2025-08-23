@@ -3,12 +3,13 @@ import json
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
 from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import BaseMessage
 from langchain_core.prompt_values import ChatPromptValue 
 
 # 導入我們之前建立的 Agent 工廠函式和資料模型
-from core.agent import create_agent_graph
+from core.agent import create_master_graph
 from app.models.schemas import ChatRequest
 
 # --- 日誌與應用程式初始化 ---
@@ -29,28 +30,7 @@ app.add_middleware(
 )
 
 # 在應用程式啟動時，呼叫工廠函式一次，建立 Agent 執行緒
-agent_executable = create_agent_graph()
-
-
-# --- 新增一個輔助函式來轉換資料 ---
-def convert_docs_to_dict(docs):
-    """
-    一個更通用的輔助函式，將任何繼承自 BaseMessage 的 LangChain 物件轉換為可序列化的字典。
-    """
-    # 只要是 LangChain 的 Message 物件
-    if isinstance(docs, BaseMessage): 
-        return {"type": docs.type, "content": docs.content}
-    if isinstance(docs, ChatPromptValue):
-        return convert_docs_to_dict(docs.to_messages())
-    # 如果是列表，遞迴處理裡面的每個元素
-    if isinstance(docs, list):
-        return [convert_docs_to_dict(doc) for doc in docs]
-    # 如果是字典，遞迴處理裡面的每個值
-    if isinstance(docs, dict):
-        return {key: convert_docs_to_dict(value) for key, value in docs.items()}
-    # 如果是其他基本類型，直接返回
-    return docs
-
+agent_executable = create_master_graph()
 
 # --- API 端點 (Endpoint) 定義 ---
 @app.post("/api/v1/chat/stream")
@@ -64,7 +44,7 @@ async def chat_stream(request: ChatRequest):
     """
     thread_id = request.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
-    inputs = {"messages": [("user", request.message)]}
+    inputs = {"main_goal": request.message}
 
     async def event_generator():
         """
@@ -80,7 +60,7 @@ async def chat_stream(request: ChatRequest):
             # 非同步地迭代 Agent 的執行事件
             async for event in agent_executable.astream_events(inputs, config=config, version="v1"): # pyright: ignore[reportArgumentType]
                 event_type = event['event']
-                serializable_data = convert_docs_to_dict(event['data'])
+                serializable_data = jsonable_encoder(event['data'])
                 payload = {"type": event_type, "data": serializable_data}
 
                 # 我們只串流結束事件，以簡化前端處理
@@ -96,3 +76,4 @@ async def chat_stream(request: ChatRequest):
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Advanced Agent API. Please use the /docs endpoint for documentation."}
+

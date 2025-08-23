@@ -20,7 +20,7 @@ def get_llama_gemini_flash():
     logging.info('首次初始化 Gemini 2.5 Flash...')
     return GoogleGenAI(
         model_name=settings.GEMINI_FLASH,
-        api_key=settings.GOOGLE_API_KEY.get_secret_value()
+        api_key=settings.GEMINI_API_KEY.get_secret_value()
     )
 
 @lru_cache(maxsize=None)
@@ -28,14 +28,29 @@ def get_langchain_gemini_pro():
     logging.info('首次初始化 Gemini 2.5 Pro...')
     return ChatGoogleGenerativeAI(
         model=settings.GEMINI_PRO,
-        api_key=settings.GOOGLE_API_KEY.get_secret_value(),
+        api_key=settings.GEMINI_API_KEY.get_secret_value(), # pyright: ignore[reportArgumentType]
         safety_settings={
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
+        } # pyright: ignore[reportArgumentType]
     )
+
+@lru_cache(maxsize=None)
+def get_langchain_gemini_flash():
+    logging.info('首次初始化 Gemini 2.5 Flash...')
+    return ChatGoogleGenerativeAI(
+        model=settings.GEMINI_FLASH,
+        api_key=settings.GEMINI_API_KEY.get_secret_value(), # pyright: ignore[reportArgumentType]
+        safety_settings={
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        } # pyright: ignore[reportArgumentType]
+    )
+
 
 # 初始化 Embedding 模型
 @lru_cache(maxsize=None)
@@ -43,7 +58,7 @@ def get_llama_gemini_embed():
     logging.info('首次初始化 Embedding Model...')
     return GoogleGenAIEmbedding(
         model_name=settings.GEMINI_EMBED,
-        api_key=settings.GOOGLE_API_KEY.get_secret_value(),
+        api_key=settings.GEMINI_API_KEY.get_secret_value(),
         embedding_config=types.EmbedContentConfig(output_dimensionality=settings.GEMINI_DIMENSION),
         task_type="RETRIEVAL_DOCUMENT",
         embed_batch_size=1,
