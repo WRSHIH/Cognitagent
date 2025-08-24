@@ -5,13 +5,13 @@ from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional
 from functools import lru_cache
 
 from langgraph.graph import StateGraph, END, START
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 # 導入我們集中管理的 LLM 服務和工具列表
-from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash
+from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, get_langchain_gemini_flash_lite
 from core.tool_registry import ALL_TOOLS
 from core.tools.web_search import search_tool
 from core.tools.rag_tool import DeepResearchKnowledgeBase
@@ -115,9 +115,10 @@ class AgentNodes:
         logging.info("--- 路由節點：評估任務複雜度 ---")
         goal = state['main_goal']        
         try:
-            router_llm = get_langchain_gemini_flash().with_structured_output(RouteDecision)
+            router_llm = get_langchain_gemini_flash_lite().with_structured_output(RouteDecision)
             router_prompt = load_prompt("agent_router.txt")
-            response = router_llm.invoke(router_prompt)
+            formatted_prompt = router_prompt.format(goal=goal)
+            response = router_llm.invoke(formatted_prompt)
             return {"route_decision": response.decision} # pyright: ignore[reportAttributeAccessIssue]
         
         except Exception as e:
@@ -131,18 +132,44 @@ class AgentNodes:
                 return {"route_decision": "simple_query"}
 
     def simple_query_executor_node(self, state: AgentState) -> dict:
-        
         logging.info("--- 快速路徑：直接執行簡單查詢 ---")
         goal = state['main_goal']
-        
         try:
-            llm_with_tools = get_langchain_gemini_flash().bind_tools(ALL_TOOLS)
+            llm_with_tools = get_langchain_gemini_flash_lite().bind_tools(ALL_TOOLS)
+            logging.info("--- 快速路徑：LLM 正在決策... ---")
             response_message = llm_with_tools.invoke(goal)
-            final_response = response_message.content
-            if not final_response: 
-                 final_response = "工具已執行，但未生成直接的文字回覆。"
-            return {"response": final_response}
-        
+            if response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
+                logging.info(f"--- 快速路徑：偵測到工具呼叫: {[tc['name'] for tc in response_message.tool_calls]} ---") # pyright: ignore[reportAttributeAccessIssue]
+
+                tool_messages = []
+                for tool_call in response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
+                    tool_name = tool_call.get('name')
+                    tool_to_call = self.tool.get(tool_name)
+                    
+                    observation = ""
+                    if not tool_to_call:
+                        error_msg = f"錯誤：模型嘗試呼叫一個不存在的工具 '{tool_name}'。"
+                        observation = error_msg
+                        logging.error(error_msg)
+                    else:
+                        try:
+                            logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
+                            # 執行工具並取得結果
+                            observation = tool_to_call.invoke(tool_call['args'])
+                        except Exception as e:
+                            observation = f"工具 '{tool_name}' 執行時發生錯誤: {e}"
+                            logging.error(observation)
+
+                tool_messages.append(ToolMessage(content=str(observation), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
+                logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
+                final_response_message = llm_with_tools.invoke([HumanMessage(content=goal), response_message] + tool_messages)
+                return {"response": final_response_message.content}
+            
+            else:
+                logging.info("--- 快速路徑：LLM 直接生成回覆 ---")
+                if not response_message.content:
+                    return {"response": "模型選擇不使用工具，但未提供直接的回覆。"}
+                return {"response": response_message.content}
         except Exception as e:
             logging.error(f"簡單查詢執行失敗: {e}")
             return {"response": f"處理您的請求時發生錯誤: {e}"}
@@ -305,6 +332,9 @@ def create_master_graph():
 if __name__ == "__main__":
     Actions = AgentNodes(max_replans=3)
     Query = {"main_goal": "鐵達尼號的導演是誰"}
+    # Actions.router_node(Query)
+    Query_from_route = {"main_goal": "鐵達尼號的導演是誰", "route_decision": 'simple_query'}
+    # print(Actions.simple_query_executor_node(Query_from_route))
     # planner_Res = Actions.meta_planner_node(Query)
     # print(planner_Res)
     After_planner_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
@@ -391,7 +421,7 @@ if __name__ == "__main__":
                                 'current_sub_goal_id': 1
                                 }
     # print(Actions.executive_node(After_reflection_state))
-    Actions.executive_node(After_reflection_state)
+    # Actions.executive_node(After_reflection_state)
     After_executive2_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
                                                         sub_goals=[SubGoal(goal_id=1, 
                                                                             description='使用tavily_search 搜尋“鐵達尼號的導演”', 
@@ -433,7 +463,7 @@ if __name__ == "__main__":
                                 "main_goal": "鐵達尼號的導演是誰",
                                 'current_sub_goal_id': 2
                                 }
-    print(Actions.execute_subgraph_node(After_executive2_state))
+    # print(Actions.execute_subgraph_node(After_executive2_state))
 
 
 

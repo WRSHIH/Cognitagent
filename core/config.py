@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     QDRANT_URL: HttpUrl
 
     # 模型設定
+    GEMINI_FLASH_LITE: str
     GEMINI_FLASH: str
     GEMINI_PRO: str
     GEMINI_EMBED: str

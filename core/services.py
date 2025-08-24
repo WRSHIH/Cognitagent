@@ -51,6 +51,21 @@ def get_langchain_gemini_flash():
         } # pyright: ignore[reportArgumentType]
     )
 
+@lru_cache(maxsize=None)
+def get_langchain_gemini_flash_lite():
+    logging.info('首次初始化 Gemini 2.5 Flash Lite...')
+    return ChatGoogleGenerativeAI(
+        model=settings.GEMINI_FLASH_LITE,
+        api_key=settings.GEMINI_API_KEY.get_secret_value(), # pyright: ignore[reportArgumentType]
+        safety_settings={
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        } # pyright: ignore[reportArgumentType]
+    )
+
+
 
 # 初始化 Embedding 模型
 @lru_cache(maxsize=None)
