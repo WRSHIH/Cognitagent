@@ -78,7 +78,7 @@ def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
                                                                     `tool_name` 必須與上面「工具名稱」中的一個完全匹配。"""),
                                                                     ("human", "子目標: {sub_goal}")
                                                                 ])
-    structured_llm = get_langchain_gemini_flash().with_structured_output(ToolSelection)
+    structured_llm = get_langchain_gemini_flash_lite().with_structured_output(ToolSelection)
     chain = prompt_template | structured_llm
 
     try:
@@ -131,13 +131,13 @@ class AgentNodes:
                 logging.info(f"--- 規則決策：簡單查詢 -> 啟動快速路徑 ---")
                 return {"route_decision": "simple_query"}
 
-    def simple_query_executor_node(self, state: AgentState) -> dict:
+    async def simple_query_executor_node(self, state: AgentState) -> dict:
         logging.info("--- 快速路徑：直接執行簡單查詢 ---")
         goal = state['main_goal']
         try:
             llm_with_tools = get_langchain_gemini_flash_lite().bind_tools(ALL_TOOLS)
             logging.info("--- 快速路徑：LLM 正在決策... ---")
-            response_message = llm_with_tools.invoke(goal)
+            response_message = await llm_with_tools.ainvoke(goal)
             if response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
                 logging.info(f"--- 快速路徑：偵測到工具呼叫: {[tc['name'] for tc in response_message.tool_calls]} ---") # pyright: ignore[reportAttributeAccessIssue]
 
@@ -160,9 +160,10 @@ class AgentNodes:
                             observation = f"工具 '{tool_name}' 執行時發生錯誤: {e}"
                             logging.error(observation)
 
-                tool_messages.append(ToolMessage(content=str(observation), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
+                    tool_messages.append(ToolMessage(content=str(observation), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
                 logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
-                final_response_message = llm_with_tools.invoke([HumanMessage(content=goal), response_message] + tool_messages)
+                final_response_message = await llm_with_tools.ainvoke([HumanMessage(content=goal), response_message] + tool_messages)
+                logging.info(f"--- 快速路徑：最終生成的回覆內容: '{final_response_message.content}' ---")
                 return {"response": final_response_message.content}
             
             else:

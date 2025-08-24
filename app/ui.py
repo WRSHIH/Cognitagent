@@ -51,22 +51,29 @@ async def chat_client(message: str, history: list, thread_id: str | None):
                         try:
                             data_str = line[len('data:'):].strip()
                             event_data = json.loads(data_str)
+                            # print(f"--- [FRONTEND RECEIVED]: {event_data} ---")
 
                             if event_data.get("type") == "thread_id" and not thread_id:
                                 thread_id = event_data.get("id")
 
                             # 更新 Agent 工作日誌
                             agent_log += format_log_message(event_data)
-
+                            
                             # 如果是 LLM 的回應，更新聊天視窗的內容
-                            if event_data.get("type") == "on_chat_model_end":
+                            content = ""
+                            if event_data.get("type") == "final_answer":
+                                content = event_data.get("data", {}).get("content", "")
+                            elif event_data.get("type") == "on_chat_model_end":
                                 llm_output = event_data.get("data", {}).get("output", {})
                                 if isinstance(llm_output, dict):
-                                     full_response = llm_output.get("content", "")
-                                     history[-1][1] = full_response
-
+                                    try:
+                                        content = llm_output['generations'][0][0]['message']['content']
+                                    except (KeyError, IndexError, TypeError):
+                                        # 如果失敗，則回退到解析簡單結構
+                                        content = llm_output.get("content", "")
+                            if content:
+                                history[-1][1] = content
                             yield history, agent_log, thread_id
-
                         except json.JSONDecodeError:
                             continue # 忽略無法解析的行
     except httpx.ConnectError as e:
