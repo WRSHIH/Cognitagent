@@ -177,35 +177,43 @@ class AgentNodes:
         
     async def meta_planner_node(self, state: AgentState) -> dict:
         logging.info("--- 元規劃器：生成/更新高階策略樹 ---")
-        structured_planner_llm = get_langchain_gemini_flash_lite().with_structured_output(HierarchicalPlan)
+        structured_planner_llm = get_langchain_gemini_flash().with_structured_output(HierarchicalPlan)
         previous_plan_summary = ""
         if state.get('plan'):
             previous_plan_summary = f"Previous plan execution summary: {json.dumps(state['working_memory'], indent=2)}. Please refine the plan based on this."
-        
+        formatted_tools_for_planner = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tool.values()])
         prompt = f"""
-        Analyze the user's goal and create a hierarchical plan to achieve it.
-        Break the main goal down into a sequence of smaller, executable sub-goals.
-        For each sub-goal, define its dependencies on other sub-goals.
-        
-        Available Tools: {[tool.name for tool in ALL_TOOLS]}. 
-        
-        User's Goal: {state['main_goal']}
+        你是專案的總策劃師。你的任務是根據使用者的最終目標，將其分解為一系列清晰、可執行的子目標，並規劃出一個策略樹。
+
+        在規劃時，你必須考慮以下可用的工具集：
+        --- 工具列表 ---
+        {formatted_tools_for_planner}
+        --- 結束列表 ---
+
+        **規劃指南:**
+        1.  **外部資訊獲取**: 當需要從網路、知識庫獲取新資訊時，規劃使用 `tavily_search` 或 `DeepResearchKnowledgeBase`。
+        2.  **內部資訊處理**: 當你需要對【已經蒐集到的資訊】進行整理、分類、分組、總結或任何形式的轉換時，你【必須】規劃一個使用 `CognitiveProcessorTool` 的步驟。這是唯一的內部處理工具。
+        3.  **依賴關係**: 明確定義每個子目標的依賴關係。例如，在整理資訊之前，必須先完成資訊的蒐集。
+
+        **使用者的最終目標:** {state['main_goal']}
         {previous_plan_summary}
 
-        Your response MUST be a valid JSON object that conforms to the HierarchicalPlan schema.
-        Do not add any text or explanations outside of the JSON object.
+        你的回應必須是一個嚴格遵守 HierarchicalPlan 結構的 JSON 物件，不要包含任何額外的解釋。
         """
 
         try:
             plan = await structured_planner_llm.ainvoke(prompt)
+
+            plan_dict = plan.model_dump() if hasattr(plan, 'model_dump') else plan # pyright: ignore[reportAttributeAccessIssue]
+            logging.info(f"--- [DEBUG] 元規劃器生成的計畫詳情: ---\n{json.dumps(plan_dict, indent=2, ensure_ascii=False)}\n--- [DEBUG] ---")
             
-            if not plan or not plan.sub_goals:
+            if not plan or not plan.sub_goals: # pyright: ignore[reportAttributeAccessIssue]
                 logging.error("元規劃器未能生成有效的計畫內容 (回傳為空或沒有子目標)。")
                 return {
                     "is_human_intervention_needed": True,
                     "response": "Fatal error in planning: The meta planner failed to generate a valid plan structure."
                 }
-            logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---")
+            logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---") # pyright: ignore[reportAttributeAccessIssue]
             return {"plan": plan, "is_human_intervention_needed": False}
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
@@ -256,14 +264,50 @@ class AgentNodes:
         plan = state['plan']
         assert plan is not None, "Plan cannot be None in reflector"
         assert goal_id is not None, "Goal ID cannot be None in reflector"
-        raw_result = state.get('sub_task_raw_result')
+        main_goal = state['main_goal']
+        current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
+        working_memory_str = json.dumps(state.get('working_memory', {}), indent=2, ensure_ascii=False)
+        raw_result = str(state.get('sub_task_raw_result', ''))
 
-        structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
-        prompt = f"""Critically evaluate the result of a sub-task. Original Goal: {state['main_goal']}. Sub-Goal: {plan.sub_goals[goal_id-1].description}. Result: {str(raw_result)[:2000]}. Decide the next action ('CONTINUE', 'REPLAN'). Return JSON with keys: 'summary', 'new_status', 'next_action'."""
-        verdict = await structured_reflection_llm.ainvoke(prompt)
-        verdict = verdict.model_dump() # pyright: ignore[reportAttributeAccessIssue]
-        next_action = verdict.get('next_action', 'REPLAN') # pyright: ignore[reportAttributeAccessIssue]
-        logging.info(f"--- 反思決策: {next_action} ---")
+        prompt = f"""
+        你是一位極度嚴謹、注重細節的品質保證（QA）分析師與內容安全審核官。
+        你的職責是根據一套嚴格的標準，批判性地評估一個子任務的執行結果，並生成一份【安全、中立、客觀】的摘要。
+
+        **1. 評估的完整上下文:**
+        - **總體目標 (Main Goal):** {main_goal}
+        - **當前子目標 (Current Sub-goal):** {current_goal.description}
+        - **已知的背景資訊 (Working Memory):** ```json
+          {working_memory_str}
+          ```
+        - **子任務的執行結果 (Result to Evaluate):** ```
+          {raw_result[:2500]}
+          ```
+          
+        **2. 你的核心評估標準 (CRITICAL EVALUATION CRITERIA):**
+        - **A. 上下文利用率 (Context Utilization):** 結果是否【明確地使用】了「已知的背景資訊」來完成任務？（如果適用）
+        - **B. 目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
+        - **C. 準確性與品質 (Accuracy & Quality):** 結果本身是否準確、清晰且沒有明顯錯誤？
+        - **D. 內容中立性與安全 (Content Neutrality & Safety):** 結果中是否包含任何可能引起爭議、帶有強烈偏見、不當、或可能觸發安全審核的詞彙或語句？
+
+        **3. 你的行動指令:**
+        - **第一步：裁決 (Verdict):**
+          - 如果【所有】標準 (A, B, C, D) 都明確滿足，則你的決策是 `CONTINUE`。
+          - 如果【任何一個】標準不滿足，則你的決策必須是 `REPLAN`。
+        - **第二步：生成摘要 (Generate Summary):**
+          - 無論你的裁決是什麼，你都必須基於「子任務的執行結果」生成一份摘要。
+          - **【極度重要】** 這份摘要必須經過你的「消毒」和「中和」處理，移除所有宣傳性、主觀性、攻擊性或任何不安全的內容，只保留客觀事實與核心資訊。摘要必須是乾淨、中立的。
+
+        請以 JSON 格式回傳你的最終分析報告。JSON 必須包含以下欄位：
+        - "summary": 你生成的【安全且中立】的摘要。
+        - "new_status": 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
+        - "next_action": 你的最終決策：'CONTINUE' 或 'REPLAN'。
+        - "reasoning": 你做出此決策的詳細理由，必須明確引用上述 A, B, C, D 標準。
+        """
+        structured_reflection_llm = get_langchain_gemini_pro().with_structured_output(Verdict)
+        verdict_model = await structured_reflection_llm.ainvoke(prompt)
+        verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
+        next_action = verdict.get('next_action', 'REPLAN').upper()
+        logging.info(f"--- 反思決策: {next_action}. 理由: {verdict.get('reasoning', 'N/A')} ---")
         updated_plan = update_plan_status(plan, goal_id, verdict, raw_result) # pyright: ignore[reportArgumentType]
         summary = verdict.get('summary', 'No summary provided.') # pyright: ignore[reportAttributeAccessIssue]
         replan_count = state.get('replan_count', 0)
@@ -277,7 +321,7 @@ class AgentNodes:
 
         return {
             "plan": updated_plan,
-            "working_memory": {f"goal_{goal_id}_summary": summary},
+            "working_memory": {**state.get('working_memory',{}), f"goal_{goal_id}_summary": summary},
             "next_action": next_action,
             "replan_count": replan_count,
             "sub_task_raw_result": None
@@ -285,9 +329,22 @@ class AgentNodes:
 
     async def synthesizer_node(self, state: AgentState) -> dict:
         logging.info("--- 綜合節點：生成最終報告 ---")
-        final_prompt = f"""Synthesize the results from the working memory into a final answer for the user's goal. Goal: {state['main_goal']}. Working Memory: {json.dumps(state['working_memory'], indent=2)}"""
-        response = await get_langchain_gemini_pro().ainvoke(final_prompt)
-        return {"response": response.content}
+        final_prompt = f"""Synthesize the results from the working memory into a final answer for the user's goal. Goal: {state['main_goal']}. Working Memory: {json.dumps(state['working_memory'], indent=2, ensure_ascii=False)}"""
+        logging.info(f"--- [DEBUG] 準備發送給 Synthesizer 的最終提示詞: ---\n{final_prompt}\n--- [DEBUG] ---")
+        try:
+            response = await get_langchain_gemini_pro().ainvoke(final_prompt)
+            return {"response": response.content}
+        except ValueError as e:
+            if "No generations found in stream" in str(e):
+                error_message = "綜合報告生成失敗：模型因內容審核或其他原因未回傳任何結果。可能是因為蒐集的資料中包含了觸發安全機制的內容。"
+                logging.error(f"--- 綜合節點錯誤: {error_message} ---")
+                return {"response": f"抱歉，在為您生成最終報告時發生錯誤。原因：{error_message}"}
+            else:
+                raise e
+        except Exception as e:
+            error_message = f"綜合報告生成時發生未預期的嚴重錯誤: {e}"
+            logging.error(f"--- 綜合節點嚴重錯誤: {error_message} ---", exc_info=True)
+            return {"response": f"抱歉，系統在生成最終報告時發生嚴重錯誤。"}
         
     def human_intervention_node(self, state: AgentState) -> dict:
         logging.error("--- 任務已暫停，需要人工介入 ---")

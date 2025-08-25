@@ -85,20 +85,21 @@ async def chat_stream(payload: ChatRequest, request: Request):
             async for event in agent_executable.astream_events(inputs, config=config, version="v1"): # pyright: ignore[reportArgumentType]
                 event_type = event['event']
                 serializable_data = jsonable_encoder(event['data'])
-                
-
                 if event_type.endswith('_end'):
                     payload = {"type": event_type, "data": serializable_data}
                     yield json.dumps(payload)
-
                 if event_type == 'on_chain_end':
                     output_data = serializable_data.get('output', {})
-                    if output_data and ('simple_executor' in output_data or 'synthesizer' in output_data):
-                        final_node_output = output_data.get('simple_executor') or output_data.get('synthesizer', {})
-                        if final_node_output and 'response' in final_node_output:
-                            final_answer_payload = {"type": "final_answer",
-                                                    "data": {"content": final_node_output['response']}}
-                            yield json.dumps(final_answer_payload)
+                    if isinstance(output_data, dict):
+                        final_node_output = output_data.get('simple_executor') or output_data.get('synthesizer')
+                        if isinstance(final_node_output, dict) and 'response' in final_node_output:
+                            response_content = final_node_output.get('response')
+                            if isinstance(response_content, str):
+                                final_answer_payload = {
+                                    "type": "final_answer",
+                                    "data": {"content": response_content}
+                                }
+                                yield json.dumps(final_answer_payload)
         except Exception as e:
             logging.error(f"串流時發生錯誤: {e}", exc_info=True)
             yield json.dumps({"type": "error", "message": str(e)})
