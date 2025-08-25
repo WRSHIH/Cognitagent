@@ -65,8 +65,6 @@ def get_langchain_gemini_flash_lite():
         } # pyright: ignore[reportArgumentType]
     )
 
-
-
 # 初始化 Embedding 模型
 @lru_cache(maxsize=None)
 def get_llama_gemini_embed():
@@ -79,7 +77,7 @@ def get_llama_gemini_embed():
         embed_batch_size=1,
     )
 
-# --- LlamaIndex 全域背景設定 ---
+# LlamaIndex 全域背景設定
 def configure_llama_index_settings():
     logging.info("設定 LlamaIndex 全域參數...")
     LlamaSettings.llm = get_llama_gemini_flash()
@@ -88,7 +86,7 @@ def configure_llama_index_settings():
     
 
 
-# --- 外部服務客戶端初始化 ---
+# 外部服務客戶端初始化
 @lru_cache(maxsize=None)
 def get_qdrant_client():
     logging.info("首次初始化 Qdrant Client...")

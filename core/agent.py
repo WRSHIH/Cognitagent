@@ -63,7 +63,7 @@ def find_next_executable_goal(plan: HierarchicalPlan) -> Union[SubGoal, None]:
             return goal
     return None
 
-def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
+async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
     logging.info(f"--- LLM Tool Router: 正在為目標 '{currentgoal.description[:50]}...' 選擇工具 ---")
     formatted_tools = "\n".join([f"---\n -工具名稱: {tool.name}\n -功能描述: {tool.description}" for tool in ALL_TOOLS])
     prompt_template = ChatPromptTemplate.from_messages([
@@ -82,7 +82,7 @@ def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
     chain = prompt_template | structured_llm
 
     try:
-        response = chain.invoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
+        response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
         if response.tool_name in {tool.name for tool in ALL_TOOLS} : # pyright: ignore[reportAttributeAccessIssue]
             logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
             return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
@@ -111,14 +111,14 @@ class AgentNodes:
         self.MAX_REPLANS = max_replans
         self.tool = {tool.name: tool for tool in ALL_TOOLS}
     
-    def router_node(self, state: AgentState) -> dict:
+    async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
         goal = state['main_goal']        
         try:
             router_llm = get_langchain_gemini_flash_lite().with_structured_output(RouteDecision)
             router_prompt = load_prompt("agent_router.txt")
             formatted_prompt = router_prompt.format(goal=goal)
-            response = router_llm.invoke(formatted_prompt)
+            response = await router_llm.ainvoke(formatted_prompt)
             return {"route_decision": response.decision} # pyright: ignore[reportAttributeAccessIssue]
         
         except Exception as e:
@@ -155,7 +155,7 @@ class AgentNodes:
                         try:
                             logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
                             # 執行工具並取得結果
-                            observation = tool_to_call.invoke(tool_call['args'])
+                            observation = await tool_to_call.ainvoke(tool_call['args'])
                         except Exception as e:
                             observation = f"工具 '{tool_name}' 執行時發生錯誤: {e}"
                             logging.error(observation)
@@ -175,7 +175,7 @@ class AgentNodes:
             logging.error(f"簡單查詢執行失敗: {e}")
             return {"response": f"處理您的請求時發生錯誤: {e}"}
         
-    def meta_planner_node(self, state: AgentState) -> dict:
+    async def meta_planner_node(self, state: AgentState) -> dict:
         logging.info("--- 元規劃器：生成/更新高階策略樹 ---")
         structured_planner_llm = get_langchain_gemini_pro().with_structured_output(HierarchicalPlan)
         previous_plan_summary = ""
@@ -183,7 +183,7 @@ class AgentNodes:
             previous_plan_summary = f"Previous plan execution summary: {json.dumps(state['working_memory'], indent=2)}. Please refine the plan based on this."
         prompt = f"""Create a hierarchical plan to achieve the user's goal. Break it down into sub-goals with dependencies. Available Tools: {[tool.name for tool in ALL_TOOLS]}. User's Goal: {state['main_goal']}. {previous_plan_summary}"""
         try:
-            plan = structured_planner_llm.invoke(prompt)
+            plan = await structured_planner_llm.ainvoke(prompt)
             return {"plan": plan, "is_human_intervention_needed": False}
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
@@ -205,7 +205,7 @@ class AgentNodes:
             logging.info("--- 執行官：所有任務完成，準備綜合報告 ---")
             return {}
 
-    def execute_subgraph_node(self, state: AgentState) -> dict:
+    async def execute_subgraph_node(self, state: AgentState) -> dict:
         goal_id = state['current_sub_goal_id']
         plan = state['plan']
         assert plan is not None, "Plan cannot be None in executor"
@@ -216,7 +216,7 @@ class AgentNodes:
         
         try:
             if chosen_tool_name:
-                result = self.tool.get(chosen_tool_name).invoke({"query": current_goal.description}) # pyright: ignore[reportOptionalMemberAccess]
+                result = await self.tool.get(chosen_tool_name).ainvoke({"query": current_goal.description}) # pyright: ignore[reportOptionalMemberAccess]
                 return {"sub_task_raw_result": result}
             else:
                 raise ValueError(f"工具未在工具列表中找到適合的工具。")
@@ -224,7 +224,7 @@ class AgentNodes:
             logging.error(f"[{chosen_tool_name}] 工具執行失敗: {e}")
             return {"sub_task_raw_result": f"Error executing tool '{chosen_tool_name}': {e}"}
 
-    def reflection_node(self, state: AgentState) -> dict:
+    async def reflection_node(self, state: AgentState) -> dict:
         logging.info("--- 高級反思器：評估子任務結果 ---")
         goal_id = state['current_sub_goal_id']
         plan = state['plan']
@@ -234,7 +234,7 @@ class AgentNodes:
 
         structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
         prompt = f"""Critically evaluate the result of a sub-task. Original Goal: {state['main_goal']}. Sub-Goal: {plan.sub_goals[goal_id-1].description}. Result: {str(raw_result)[:2000]}. Decide the next action ('CONTINUE', 'REPLAN'). Return JSON with keys: 'summary', 'new_status', 'next_action'."""
-        verdict = structured_reflection_llm.invoke(prompt)
+        verdict = await structured_reflection_llm.ainvoke(prompt)
         verdict = verdict.model_dump() # pyright: ignore[reportAttributeAccessIssue]
         next_action = verdict.get('next_action', 'REPLAN') # pyright: ignore[reportAttributeAccessIssue]
         logging.info(f"--- 反思決策: {next_action} ---")
@@ -257,10 +257,10 @@ class AgentNodes:
             "sub_task_raw_result": None
         }
 
-    def synthesizer_node(self, state: AgentState) -> dict:
+    async def synthesizer_node(self, state: AgentState) -> dict:
         logging.info("--- 綜合節點：生成最終報告 ---")
         final_prompt = f"""Synthesize the results from the working memory into a final answer for the user's goal. Goal: {state['main_goal']}. Working Memory: {json.dumps(state['working_memory'], indent=2)}"""
-        response = get_langchain_gemini_pro().invoke(final_prompt)
+        response = await get_langchain_gemini_pro().ainvoke(final_prompt)
         return {"response": response.content}
         
     def human_intervention_node(self, state: AgentState) -> dict:

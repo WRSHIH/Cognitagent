@@ -33,8 +33,8 @@ async def chat_client(message: str, history: list, thread_id: str | None):
     history = history or []
 
     agent_log = "** Agent 工作日誌**\n\n"
-    full_response = ""
     history.append([message, ""])
+    yield history, agent_log, thread_id, ""
 
     try:
         # 使用 httpx 建立一個異步的串流請求
@@ -42,7 +42,7 @@ async def chat_client(message: str, history: list, thread_id: str | None):
             async with client.stream("POST", API_URL, json=payload) as response:
                 if response.status_code != 200:
                     history[-1][1] = f"錯誤: {response.text}"
-                    yield history, agent_log, thread_id
+                    yield history, agent_log, thread_id, ""
                     return
 
                 # 處理從後端 API 發送過來的 SSE 事件
@@ -73,12 +73,12 @@ async def chat_client(message: str, history: list, thread_id: str | None):
                                         content = llm_output.get("content", "")
                             if content:
                                 history[-1][1] = content
-                            yield history, agent_log, thread_id
+                            yield history, agent_log, thread_id, ""
                         except json.JSONDecodeError:
                             continue # 忽略無法解析的行
     except httpx.ConnectError as e:
         history[-1][1] = f"無法連接到後端 API: {API_URL}。請確認後端服務是否已啟動。\n{e}"
-        yield history, agent_log, thread_id
+        yield history, agent_log, thread_id, ""
 
 
 # --- 建立並啟動 Gradio 介面 ---
@@ -87,7 +87,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Agent UI") as demo:
     # 使用 gr.State 來跨回合儲存 thread_id
     session_thread_id = gr.State(None)
 
-    gr.Markdown("#  Agentic General Assistant (Decoupled UI)")
+    gr.Markdown("#  Agentic General Assistant")
 
     with gr.Row():
         with gr.Column(scale=2):
@@ -110,14 +110,14 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Agent UI") as demo:
     txt_input.submit(
         fn=chat_client,
         inputs=[txt_input, chatbot, session_thread_id],
-        outputs=[chatbot, agent_log, session_thread_id]
-    ).then(lambda: "", [], [txt_input])
+        outputs=[chatbot, agent_log, session_thread_id, txt_input]
+    )
 
     btn_submit.click(
         fn=chat_client,
         inputs=[txt_input, chatbot, session_thread_id],
-        outputs=[chatbot, agent_log, session_thread_id]
-    ).then(lambda: "", [], [txt_input])
+        outputs=[chatbot, agent_log, session_thread_id, txt_input]
+    )
 
 
 if __name__ == "__main__":

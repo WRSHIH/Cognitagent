@@ -1,40 +1,64 @@
 import uuid
 import json
 import logging
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from sse_starlette.sse import EventSourceResponse
-from langchain_core.messages import BaseMessage
-from langchain_core.prompt_values import ChatPromptValue 
 
 # 導入我們之前建立的 Agent 工廠函式和資料模型
 from core.agent import create_master_graph
 from app.models.schemas import ChatRequest
 
-# --- 日誌與應用程式初始化 ---
+# 預先載入所有的服務
+from core.services import (
+    get_langchain_gemini_pro,
+    get_langchain_gemini_flash,
+    get_langchain_gemini_flash_lite,
+    get_llama_gemini_embed
+)
+from core.tools.rag_tool import get_index
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.info("🚀 應用程式啟動中，開始預先載入模型與服務...")
+
+    get_langchain_gemini_pro()
+    get_langchain_gemini_flash()
+    get_langchain_gemini_flash_lite()
+    get_llama_gemini_embed()
+    logging.info("✅ LLM 與 Embedding 模型載入完成。")
+
+    get_index()
+    logging.info("✅ RAG 索引與向量資料庫連線完成。")
+
+    # 預先編譯 Agent 執行緒
+    app.state.agent_executable = create_master_graph()
+    logging.info("✅ Agent 執行緒編譯完成。")
+    logging.info("🎉 所有資源已成功預先載入，服務準備就緒！")
+    yield
 
 app = FastAPI(
     title="Advanced Agent API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
-# 允許跨來源請求 (CORS)，這對於前後端分離的開發至關重要
+# 允許跨來源請求 (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 在生產環境中應指定前端的具體來源
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 在應用程式啟動時，呼叫工廠函式一次，建立 Agent 執行緒
-agent_executable = create_master_graph()
-
-# --- API 端點 (Endpoint) 定義 ---
+# API 端點 (Endpoint) 定義
 @app.post("/api/v1/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(payload: ChatRequest, request: Request):
     """
     當前端發送一個聊天請求時，這個端點會啟動 Agent 的執行過程，
     並將 Agent 的回應以串流的方式發送回前端。
@@ -42,9 +66,10 @@ async def chat_stream(request: ChatRequest):
     串流的過程中，會將 Agent 的事件格式化為 SSE 事件，
     並在串流結束時發送結束事件。
     """
-    thread_id = request.thread_id or str(uuid.uuid4())
+    agent_executable = request.app.state.agent_executable
+    thread_id = payload.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
-    inputs = {"main_goal": request.message}
+    inputs = {"main_goal": payload.message}
 
     async def event_generator():
         """
