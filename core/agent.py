@@ -47,7 +47,7 @@ class Verdict(BaseModel):
 class AgentState(TypedDict):
     main_goal: str
     plan: Union[HierarchicalPlan, None]
-    working_memory: Annotated[dict, operator.add]
+    working_memory: Annotated[dict, lambda left, right: {**left, **right}]
     current_sub_goal_id: Union[int, None]
     sub_task_raw_result: Union[dict, str, None]
     replan_count: int
@@ -177,13 +177,35 @@ class AgentNodes:
         
     async def meta_planner_node(self, state: AgentState) -> dict:
         logging.info("--- 元規劃器：生成/更新高階策略樹 ---")
-        structured_planner_llm = get_langchain_gemini_pro().with_structured_output(HierarchicalPlan)
+        structured_planner_llm = get_langchain_gemini_flash_lite().with_structured_output(HierarchicalPlan)
         previous_plan_summary = ""
         if state.get('plan'):
             previous_plan_summary = f"Previous plan execution summary: {json.dumps(state['working_memory'], indent=2)}. Please refine the plan based on this."
-        prompt = f"""Create a hierarchical plan to achieve the user's goal. Break it down into sub-goals with dependencies. Available Tools: {[tool.name for tool in ALL_TOOLS]}. User's Goal: {state['main_goal']}. {previous_plan_summary}"""
+        
+        prompt = f"""
+        Analyze the user's goal and create a hierarchical plan to achieve it.
+        Break the main goal down into a sequence of smaller, executable sub-goals.
+        For each sub-goal, define its dependencies on other sub-goals.
+        
+        Available Tools: {[tool.name for tool in ALL_TOOLS]}. 
+        
+        User's Goal: {state['main_goal']}
+        {previous_plan_summary}
+
+        Your response MUST be a valid JSON object that conforms to the HierarchicalPlan schema.
+        Do not add any text or explanations outside of the JSON object.
+        """
+
         try:
             plan = await structured_planner_llm.ainvoke(prompt)
+            
+            if not plan or not plan.sub_goals:
+                logging.error("元規劃器未能生成有效的計畫內容 (回傳為空或沒有子目標)。")
+                return {
+                    "is_human_intervention_needed": True,
+                    "response": "Fatal error in planning: The meta planner failed to generate a valid plan structure."
+                }
+            logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---")
             return {"plan": plan, "is_human_intervention_needed": False}
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
@@ -211,15 +233,19 @@ class AgentNodes:
         assert plan is not None, "Plan cannot be None in executor"
         assert goal_id is not None, "Goal ID cannot be None in executor"
         current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
-        chosen_tool_name = get_specialist_for_goal_llm(current_goal)
+        chosen_tool_name = await get_specialist_for_goal_llm(current_goal)
         logging.info(f"--- 專家 [{chosen_tool_name}]: 開始處理 '{current_goal.description}' ---")
         
         try:
-            if chosen_tool_name:
-                result = await self.tool.get(chosen_tool_name).ainvoke({"query": current_goal.description}) # pyright: ignore[reportOptionalMemberAccess]
+            if chosen_tool_name and chosen_tool_name in self.tool:
+                tool_input = {"query": current_goal.description}
+                result = await self.tool[chosen_tool_name].ainvoke(tool_input)
                 return {"sub_task_raw_result": result}
             else:
-                raise ValueError(f"工具未在工具列表中找到適合的工具。")
+                logging.warning(f"--- 未找到目標 '{current_goal.description}' 的特定工具，使用通用 LLM 處理 ---")
+                general_llm = get_langchain_gemini_flash()
+                result = await general_llm.ainvoke(current_goal.description)
+                return {"sub_task_raw_result": result.content}
         except Exception as e:
             logging.error(f"[{chosen_tool_name}] 工具執行失敗: {e}")
             return {"sub_task_raw_result": f"Error executing tool '{chosen_tool_name}': {e}"}
@@ -316,7 +342,7 @@ def create_master_graph():
         if state.get("is_human_intervention_needed"):
             return "human_intervention"
         next_action = state.get("next_action")
-        if next_action.upper() == "REPLAN": # pyright: ignore[reportOptionalMemberAccess]
+        if next_action and next_action.upper() == "REPLAN": # pyright: ignore[reportOptionalMemberAccess]
             return "meta_planner"
         return "executive" # CONTINUE
     
@@ -338,132 +364,132 @@ if __name__ == "__main__":
     # print(Actions.simple_query_executor_node(Query_from_route))
     # planner_Res = Actions.meta_planner_node(Query)
     # print(planner_Res)
-    After_planner_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-                                                    sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
-                                                               SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
-                                                               'is_human_intervention_needed': False,
-                                                               "main_goal": "鐵達尼號的導演是誰",}
+    # After_planner_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
+    #                                                 sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
+    #                                                            SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
+    #                                                            'is_human_intervention_needed': False,
+    #                                                            "main_goal": "鐵達尼號的導演是誰",}
     # print(Actions.executive_node(After_planner_state))
-    After_executive_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-                                                    sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
-                                                               SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
-                                                               'is_human_intervention_needed': False,
-                                                               "main_goal": "鐵達尼號的導演是誰",
-                                                               'current_sub_goal_id': 1,}
+    # After_executive_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
+    #                                                 sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
+    #                                                            SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
+    #                                                            'is_human_intervention_needed': False,
+    #                                                            "main_goal": "鐵達尼號的導演是誰",
+    #                                                            'current_sub_goal_id': 1,}
     # print(Actions.execute_subgraph_node(After_executive_state))
-    After_execute_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-                                                    sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
-                                                               SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
-                                                               'is_human_intervention_needed': False,
-                                                               "main_goal": "鐵達尼號的導演是誰",
-                                                               'current_sub_goal_id': 1,
-                                                               'sub_task_raw_result': {'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
-                                                                                       'follow_up_questions': None, 
-                                                                                       'answer': None, 
-                                                                                       'images': [], 
-                                                                                       'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
-                                                                                                    'title': '鐵達尼號(1997年電影) - 維基百科', 
-                                                                                                    'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
-                                                                                                    'score': 0.6227582, 
-                                                                                                    'raw_content': None},
-                                                                                                    {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
-                                                                                                     'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
-                                                                                                     'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
-                                                                                                     'score': 0.6150191, 
-                                                                                                     'raw_content': None}, 
-                                                                                                     {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
-                                                                                                      'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
-                                                                                                      'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
-                                                                                                      'score': 0.55072874, 
-                                                                                                      'raw_content': None}], 
-                                                                                        'response_time': 0.77, 
-                                                                                        'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'},
-                                                                                        }
+    # After_execute_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
+    #                                                 sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
+    #                                                            SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
+    #                                                            'is_human_intervention_needed': False,
+    #                                                            "main_goal": "鐵達尼號的導演是誰",
+    #                                                            'current_sub_goal_id': 1,
+    #                                                            'sub_task_raw_result': {'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
+    #                                                                                    'follow_up_questions': None, 
+    #                                                                                    'answer': None, 
+    #                                                                                    'images': [], 
+    #                                                                                    'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
+    #                                                                                                 'title': '鐵達尼號(1997年電影) - 維基百科', 
+    #                                                                                                 'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
+    #                                                                                                 'score': 0.6227582, 
+    #                                                                                                 'raw_content': None},
+    #                                                                                                 {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
+    #                                                                                                  'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
+    #                                                                                                  'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
+    #                                                                                                  'score': 0.6150191, 
+    #                                                                                                  'raw_content': None}, 
+    #                                                                                                  {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
+    #                                                                                                   'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
+    #                                                                                                   'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
+    #                                                                                                   'score': 0.55072874, 
+    #                                                                                                   'raw_content': None}], 
+    #                                                                                     'response_time': 0.77, 
+    #                                                                                     'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'},
+    #                                                                                     }
     # print(Actions.reflection_node(After_execute_state))
-    After_reflection_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-                                                        sub_goals=[SubGoal(goal_id=1, 
-                                                                            description='使用tavily_search 搜尋“鐵達尼號的導演”', 
-                                                                            dependencies=[], 
-                                                                            status='completed', 
-                                                                            raw_result={'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
-                                                                                        'follow_up_questions': None, 
-                                                                                        'answer': None, 
-                                                                                        'images': [], 
-                                                                                        'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
-                                                                                                    'title': '鐵達尼號(1997年電影) - 維基百科', 
-                                                                                                    'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
-                                                                                                    'score': 0.6227582, 
-                                                                                                    'raw_content': None}, 
-                                                                                                    {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
-                                                                                                    'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
-                                                                                                    'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
-                                                                                                    'score': 0.6150191, 
-                                                                                                    'raw_content': None}, 
-                                                                                                    {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
-                                                                                                    'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
-                                                                                                    'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
-                                                                                                    'score': 0.55072874, 
-                                                                                                    'raw_content': None}], 
-                                                                                                    'response_time': 0.77, 
-                                                                                                    'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'}, 
-                                                                            result_summary='Successfully found that the director of Titanic is James Cameron.'), 
-                                                                    SubGoal(goal_id=2, 
-                                                                            description='總結搜尋結果並回答導演是誰', 
-                                                                            dependencies=[1], 
-                                                                            status='PENDING', 
-                                                                            raw_result=None, 
-                                                                            result_summary='')]), 
-                                'working_memory': {'goal_1_summary': 'Successfully found that the director of Titanic is James Cameron.'}, 
-                                'next_action': 'CONTINUE', 
-                                'replan_count': 0, 
-                                'sub_task_raw_result': None,
-                                'is_human_intervention_needed': False,
-                                "main_goal": "鐵達尼號的導演是誰",
-                                'current_sub_goal_id': 1
-                                }
+    # After_reflection_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
+    #                                                     sub_goals=[SubGoal(goal_id=1, 
+    #                                                                         description='使用tavily_search 搜尋“鐵達尼號的導演”', 
+    #                                                                         dependencies=[], 
+    #                                                                         status='completed', 
+    #                                                                         raw_result={'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
+    #                                                                                     'follow_up_questions': None, 
+    #                                                                                     'answer': None, 
+    #                                                                                     'images': [], 
+    #                                                                                     'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
+    #                                                                                                 'title': '鐵達尼號(1997年電影) - 維基百科', 
+    #                                                                                                 'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
+    #                                                                                                 'score': 0.6227582, 
+    #                                                                                                 'raw_content': None}, 
+    #                                                                                                 {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
+    #                                                                                                 'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
+    #                                                                                                 'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
+    #                                                                                                 'score': 0.6150191, 
+    #                                                                                                 'raw_content': None}, 
+    #                                                                                                 {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
+    #                                                                                                 'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
+    #                                                                                                 'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
+    #                                                                                                 'score': 0.55072874, 
+    #                                                                                                 'raw_content': None}], 
+    #                                                                                                 'response_time': 0.77, 
+    #                                                                                                 'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'}, 
+    #                                                                         result_summary='Successfully found that the director of Titanic is James Cameron.'), 
+    #                                                                 SubGoal(goal_id=2, 
+    #                                                                         description='總結搜尋結果並回答導演是誰', 
+    #                                                                         dependencies=[1], 
+    #                                                                         status='PENDING', 
+    #                                                                         raw_result=None, 
+    #                                                                         result_summary='')]), 
+    #                             'working_memory': {'goal_1_summary': 'Successfully found that the director of Titanic is James Cameron.'}, 
+    #                             'next_action': 'CONTINUE', 
+    #                             'replan_count': 0, 
+    #                             'sub_task_raw_result': None,
+    #                             'is_human_intervention_needed': False,
+    #                             "main_goal": "鐵達尼號的導演是誰",
+    #                             'current_sub_goal_id': 1
+    #                             }
     # print(Actions.executive_node(After_reflection_state))
     # Actions.executive_node(After_reflection_state)
-    After_executive2_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-                                                        sub_goals=[SubGoal(goal_id=1, 
-                                                                            description='使用tavily_search 搜尋“鐵達尼號的導演”', 
-                                                                            dependencies=[], 
-                                                                            status='completed', 
-                                                                            raw_result={'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
-                                                                                        'follow_up_questions': None, 
-                                                                                        'answer': None, 
-                                                                                        'images': [], 
-                                                                                        'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
-                                                                                                    'title': '鐵達尼號(1997年電影) - 維基百科', 
-                                                                                                    'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
-                                                                                                    'score': 0.6227582, 
-                                                                                                    'raw_content': None}, 
-                                                                                                    {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
-                                                                                                    'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
-                                                                                                    'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
-                                                                                                    'score': 0.6150191, 
-                                                                                                    'raw_content': None}, 
-                                                                                                    {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
-                                                                                                    'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
-                                                                                                    'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
-                                                                                                    'score': 0.55072874, 
-                                                                                                    'raw_content': None}], 
-                                                                                                    'response_time': 0.77, 
-                                                                                                    'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'}, 
-                                                                            result_summary='Successfully found that the director of Titanic is James Cameron.'), 
-                                                                    SubGoal(goal_id=2, 
-                                                                            description='總結搜尋結果並回答導演是誰', 
-                                                                            dependencies=[1], 
-                                                                            status='PENDING', 
-                                                                            raw_result=None, 
-                                                                            result_summary='')]), 
-                                'working_memory': {'goal_1_summary': 'Successfully found that the director of Titanic is James Cameron.'}, 
-                                'next_action': 'CONTINUE', 
-                                'replan_count': 0, 
-                                'sub_task_raw_result': None,
-                                'is_human_intervention_needed': False,
-                                "main_goal": "鐵達尼號的導演是誰",
-                                'current_sub_goal_id': 2
-                                }
+    # After_executive2_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
+    #                                                     sub_goals=[SubGoal(goal_id=1, 
+    #                                                                         description='使用tavily_search 搜尋“鐵達尼號的導演”', 
+    #                                                                         dependencies=[], 
+    #                                                                         status='completed', 
+    #                                                                         raw_result={'query': '使用 tavily_search 搜尋“鐵達尼號的導演”', 
+    #                                                                                     'follow_up_questions': None, 
+    #                                                                                     'answer': None, 
+    #                                                                                     'images': [], 
+    #                                                                                     'results': [{'url': 'https://zh.wikipedia.org/zh-tw/%E6%B3%B0%E5%9D%A6%E5%B0%BC%E5%85%8B%E5%8F%B7_(1997%E5%B9%B4%E7%94%B5%E5%BD%B1)', 
+    #                                                                                                 'title': '鐵達尼號(1997年電影) - 維基百科', 
+    #                                                                                                 'content': '《鐵達尼號》（英語：Titanic）是一部於1997年上映的美國史詩浪漫災難電影，由詹姆士·卡麥隆創作、導演、監製、共同製作及共同編輯。電影部分情節是根據1912年4月14日至15', 
+    #                                                                                                 'score': 0.6227582, 
+    #                                                                                                 'raw_content': None}, 
+    #                                                                                                 {'url': 'https://www.threads.com/@daniel.moviegoer/post/DGsj2UbzHd-/6-titanic%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E5%B0%8E%E6%BC%94james-cameron-19977-schindlers-list-%E8%BE%9B%E5%BE%B7%E5%8B%92%E7%9A%84%E5%90%8D%E5%96%AE-%E5%B0%8E%E6%BC%94steven-spielberg-199', 
+    #                                                                                                 'title': '6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. ...', 
+    #                                                                                                 'content': "6. 《Titanic鐵達尼號》（導演：James Cameron, 1997) 7. 《Schindler's List 辛德勒的名單》 (導演：Steven Spielberg, 1993) 8. 《The", 
+    #                                                                                                 'score': 0.6150191, 
+    #                                                                                                 'raw_content': None}, 
+    #                                                                                                 {'url': 'https://tw.news.yahoo.com/%E3%80%8C%E8%AD%A6%E5%91%8A%E9%83%BD%E4%B8%8D%E8%81%BD%E3%80%8D%E5%90%8D%E5%B0%8E%E8%A9%B9%E5%A7%86%E6%96%AF%E5%8D%A1%E9%BA%A5%E9%9A%86%E6%AD%8E%EF%BC%9A%E6%B3%B0%E5%9D%A6%E8%99%9F%E6%82%B2%E5%8A%87%E5%A6%82%E9%90%B5%E9%81%94%E5%B0%BC%E8%99%9F%E4%BA%8B%E4%BB%B6%E9%87%8D%E6%BC%94-024027016.html', 
+    #                                                                                                 'title': '「警告都不聽」名導詹姆斯‧卡麥隆歎：泰坦號悲劇如鐵達尼號 ...', 
+    #                                                                                                 'content': '電影《鐵達尼號》（Titanic）導演兼深海探險家詹姆斯‧ 卡麥隆說，關於這具旅遊潛水器的許多安全警告均遭忽視，並感歎泰坦號悲劇如鐵達尼事件重演。泰坦號', 
+    #                                                                                                 'score': 0.55072874, 
+    #                                                                                                 'raw_content': None}], 
+    #                                                                                                 'response_time': 0.77, 
+    #                                                                                                 'request_id': 'dca737c5-588e-4db2-aa13-94c34abcf495'}, 
+    #                                                                         result_summary='Successfully found that the director of Titanic is James Cameron.'), 
+    #                                                                 SubGoal(goal_id=2, 
+    #                                                                         description='總結搜尋結果並回答導演是誰', 
+    #                                                                         dependencies=[1], 
+    #                                                                         status='PENDING', 
+    #                                                                         raw_result=None, 
+    #                                                                         result_summary='')]), 
+    #                             'working_memory': {'goal_1_summary': 'Successfully found that the director of Titanic is James Cameron.'}, 
+    #                             'next_action': 'CONTINUE', 
+    #                             'replan_count': 0, 
+    #                             'sub_task_raw_result': None,
+    #                             'is_human_intervention_needed': False,
+    #                             "main_goal": "鐵達尼號的導演是誰",
+    #                             'current_sub_goal_id': 2
+    #                             }
     # print(Actions.execute_subgraph_node(After_executive2_state))
 
 
