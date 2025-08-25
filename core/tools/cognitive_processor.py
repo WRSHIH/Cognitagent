@@ -21,11 +21,8 @@ class CognitiveProcessorTool(BaseTool):
         "當你需要對已經蒐集到的資訊（儲存在工作記憶體中）進行整理、分類、分組、排序、總結或提取關鍵點時使用此工具..."
     )
 
-    # --- 最終修正：使用 ClassVar 標記 ---
-    # 告訴 Pydantic 這是一個類別層級的設定，而不是一個需要驗證的模型欄位。
     pydantic_args_schema: ClassVar[Type[BaseModel]] = CognitiveProcessorInput
 
-    # 為了滿足抽象類別的合約，我們必須實現 _run
     def _run(self, task: str, context: Dict[str, Any]) -> str:
         try:
             loop = asyncio.get_running_loop()
@@ -35,7 +32,6 @@ class CognitiveProcessorTool(BaseTool):
         return loop.run_until_complete(self._arun(task=task, context=context))
         
     async def _arun(self, task: str, context: Dict[str, Any]) -> str:
-        # ... (此處的核心邏輯完全保持不變) ...
         logging.info(f"--- 認知處理工具：開始執行任務 '{task}' ---")
         if not context:
             return "錯誤：工作記憶體 (context) 為空，無法進行處理。"

@@ -31,7 +31,7 @@ class SubGoal(BaseModel):
     goal_id: int
     description: str
     dependencies: List[int] = Field(default_factory=list)
-    status: str = "pending"
+    status: str = "todo"
     raw_result: Union[dict, str, None] = None
     result_summary: str = ""
 
@@ -59,9 +59,14 @@ class AgentState(TypedDict):
 def find_next_executable_goal(plan: HierarchicalPlan) -> Union[SubGoal, None]:
     completed_ids = {g.goal_id for g in plan.sub_goals if g.status == "completed"}
     for goal in sorted(plan.sub_goals, key=lambda g: g.goal_id):
-        if goal.status.lower() == "pending" and all(dep in completed_ids for dep in goal.dependencies):
+        if goal.status.lower() in ["pending", "todo", "待執行"] and all(dep in completed_ids for dep in goal.dependencies):
             return goal
     return None
+
+def is_plan_stuck(plan: HierarchicalPlan) -> bool:
+    has_pending_goals = any(g.status.lower() in ["pending", "todo", "待執行"] for g in plan.sub_goals)
+    next_executable = find_next_executable_goal(plan)
+    return has_pending_goals and next_executable is None
 
 async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
     logging.info(f"--- LLM Tool Router: 正在為目標 '{currentgoal.description[:50]}...' 選擇工具 ---")
@@ -83,13 +88,13 @@ async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
 
     try:
         response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
-        if response.tool_name in {tool.name for tool in ALL_TOOLS} : # pyright: ignore[reportAttributeAccessIssue]
-            logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
-            return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
+        if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}:
+            logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---")
+            return response.tool_name
         else:
-            logging.warning(f"--- LLM 路由警告: 模型回傳了不存在的工具 '{response.tool_name}'。將啟用備用方案。 ---") # pyright: ignore[reportAttributeAccessIssue]
+            tool_name_str = getattr(response, 'tool_name', 'None')
+            logging.warning(f"--- LLM 路由警告: 模型回傳了無效或不存在的工具 '{tool_name_str}'。將啟用備用方案。 ---")
             return ""
-        
     except Exception as e:
         logging.error(f"--- LLM 路由嚴重錯誤: {e}. 將啟用備用方案。 ---")
         return ""
@@ -194,6 +199,7 @@ class AgentNodes:
         1.  **外部資訊獲取**: 當需要從網路、知識庫獲取新資訊時，規劃使用 `tavily_search` 或 `DeepResearchKnowledgeBase`。
         2.  **內部資訊處理**: 當你需要對【已經蒐集到的資訊】進行整理、分類、分組、總結或任何形式的轉換時，你【必須】規劃一個使用 `CognitiveProcessorTool` 的步驟。這是唯一的內部處理工具。
         3.  **依賴關係**: 明確定義每個子目標的依賴關係。例如，在整理資訊之前，必須先完成資訊的蒐集。
+        4.  **【極度重要】狀態欄位**: `status` 是一個機器讀取的欄位。對於所有新建立的、尚未執行的子目標，其 `status` 的值【必須】設定為英文單字 "todo"。
 
         **使用者的最終目標:** {state['main_goal']}
         {previous_plan_summary}
@@ -240,14 +246,31 @@ class AgentNodes:
         plan = state['plan']
         assert plan is not None, "Plan cannot be None in executor"
         assert goal_id is not None, "Goal ID cannot be None in executor"
+        
         current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
         chosen_tool_name = await get_specialist_for_goal_llm(current_goal)
         logging.info(f"--- 專家 [{chosen_tool_name}]: 開始處理 '{current_goal.description}' ---")
         
         try:
             if chosen_tool_name and chosen_tool_name in self.tool:
-                tool_input = {"query": current_goal.description}
-                result = await self.tool[chosen_tool_name].ainvoke(tool_input)
+                tool_to_call = self.tool[chosen_tool_name]
+                tool_schema_properties = tool_to_call.get_input_schema().schema().get('properties', {})
+                invoke_input = {}
+                if 'context' in tool_schema_properties:
+                    invoke_input['context'] = state.get('working_memory', {})
+                primary_input_key = next((key for key in tool_schema_properties if key != 'context'), None)
+                if primary_input_key:
+                    invoke_input[primary_input_key] = current_goal.description
+                if len(tool_schema_properties) == 1 and 'context' not in tool_schema_properties:
+                    single_key = list(tool_schema_properties.keys())[0]
+                    final_input = {single_key: current_goal.description}
+                elif not invoke_input and tool_schema_properties:
+                     logging.warning(f"--- 執行官警告: 無法為工具 '{chosen_tool_name}' 建構有效的輸入。")
+                     final_input = current_goal.description
+                else:
+                    final_input = invoke_input
+                logging.info(f"--- 執行官：準備以如下參數呼叫工具 '{chosen_tool_name}': {list(final_input.keys()) if isinstance(final_input, dict) else 'String Input'} ---")
+                result = await tool_to_call.ainvoke(final_input)
                 return {"sub_task_raw_result": result}
             else:
                 logging.warning(f"--- 未找到目標 '{current_goal.description}' 的特定工具，使用通用 LLM 處理 ---")
@@ -257,6 +280,7 @@ class AgentNodes:
         except Exception as e:
             logging.error(f"[{chosen_tool_name}] 工具執行失敗: {e}")
             return {"sub_task_raw_result": f"Error executing tool '{chosen_tool_name}': {e}"}
+
 
     async def reflection_node(self, state: AgentState) -> dict:
         logging.info("--- 高級反思器：評估子任務結果 ---")
@@ -270,42 +294,63 @@ class AgentNodes:
         raw_result = str(state.get('sub_task_raw_result', ''))
 
         prompt = f"""
-        你是一位極度嚴謹、注重細節的品質保證（QA）分析師與內容安全審核官。
-        你的職責是根據一套嚴格的標準，批判性地評估一個子任務的執行結果，並生成一份【安全、中立、客觀】的摘要。
+        你是一位經驗豐富的專案經理，你的核心職責是評估子任務的執行結果，並決定專案的下一步走向。
+        你需要有智慧地判斷，而不是機械地追求完美。
 
-        **1. 評估的完整上下文:**
+        **1. 專案的完整上下文:**
         - **總體目標 (Main Goal):** {main_goal}
         - **當前子目標 (Current Sub-goal):** {current_goal.description}
         - **已知的背景資訊 (Working Memory):** ```json
           {working_memory_str}
           ```
-        - **子任務的執行結果 (Result to Evaluate):** ```
+        - **子任務的原始執行結果 (Result to Evaluate):** ```
           {raw_result[:2500]}
           ```
           
-        **2. 你的核心評估標準 (CRITICAL EVALUATION CRITERIA):**
-        - **A. 上下文利用率 (Context Utilization):** 結果是否【明確地使用】了「已知的背景資訊」來完成任務？（如果適用）
-        - **B. 目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
-        - **C. 準確性與品質 (Accuracy & Quality):** 結果本身是否準確、清晰且沒有明顯錯誤？
-        - **D. 內容中立性與安全 (Content Neutrality & Safety):** 結果中是否包含任何可能引起爭議、帶有強烈偏見、不當、或可能觸發安全審核的詞彙或語句？
+        **2. 你的決策框架 (DECISION FRAMEWORK):**
+        - **A. 任務類型判斷 (Task Type Analysis):**
+          - 這是**初步的資訊蒐集任務**嗎 (例如，使用搜尋工具)？
+          - 還是**後續的處理/分析任務** (例如，整理、規劃、總結)？
 
-        **3. 你的行動指令:**
-        - **第一步：裁決 (Verdict):**
-          - 如果【所有】標準 (A, B, C, D) 都明確滿足，則你的決策是 `CONTINUE`。
-          - 如果【任何一個】標準不滿足，則你的決策必須是 `REPLAN`。
-        - **第二步：生成摘要 (Generate Summary):**
-          - 無論你的裁決是什麼，你都必須基於「子任務的執行結果」生成一份摘要。
-          - **【極度重要】** 這份摘要必須經過你的「消毒」和「中和」處理，移除所有宣傳性、主觀性、攻擊性或任何不安全的內容，只保留客觀事實與核心資訊。摘要必須是乾淨、中立的。
+        - **B. 核心評估標準 (CRITICAL EVALUATION CRITERIA):**
+          - **對於資訊蒐集任務:**
+            - **相關性 (Relevance):** 結果是否與「當前子目標」高度相關？
+            - **充分性 (Sufficiency):** 結果是否提供了【足夠的基礎資訊】，讓【下一個】子任務可以繼續進行？(注意：這裡不需要「完全詳盡」，只需要「足夠下一步」即可)。
+          - **對於處理/分析任務:**
+            - **目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
+            - **品質 (Quality):** 結果是否清晰、結構化且沒有明顯錯誤？
+
+        - **C. 內容安全審核 (Content Safety Check):**
+            - 結果中是否包含任何不當、攻擊性、或帶有強烈偏見的內容？
+
+        **3. 你的行動指令 (ACTIONABLE INSTRUCTIONS):**
+        - **第一步：生成摘要 (Generate Summary):**
+          - 無論你的最終決策是什麼，都必須先根據「子任務的原始執行結果」，生成一份【客觀、中立、安全】的摘要，移除所有主觀或不安全的內容。
+        - **第二步：做出裁決 (Make a Verdict):**
+          - 如果結果是**完全無關**的、**錯誤的**，或包含**不安全內容**，則你的決策是 `REPLAN`。
+          - 對於**資訊蒐集任務**，只要結果滿足【相關性】和【充分性】，即使不夠完美，你的決策也【應該是 `CONTINUE`】，以推動專案進程。
+          - 對於**處理/分析任務**，你需要更嚴格地評估其【目標達成度】和【品質】，若不滿足則決策為 `REPLAN`。
+          - 在絕大多數情況下，只要我們獲得了有用的新資訊，就應該選擇 `CONTINUE`。
 
         請以 JSON 格式回傳你的最終分析報告。JSON 必須包含以下欄位：
-        - "summary": 你生成的【安全且中立】的摘要。
-        - "new_status": 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
-        - "next_action": 你的最終決策：'CONTINUE' 或 'REPLAN'。
-        - "reasoning": 你做出此決策的詳細理由，必須明確引用上述 A, B, C, D 標準。
+        - "summary": (字串) 你生成的【安全且中立】的摘要。
+        - "new_status": (字串) 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
+        - "next_action": (字串) 你的最終決策：'CONTINUE' 或 'REPLAN'。
+        - "reasoning": (字串) 你做出此決策的詳細理由，必須明確引用上述的決策框架。
         """
-        structured_reflection_llm = get_langchain_gemini_pro().with_structured_output(Verdict)
+        structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
         verdict_model = await structured_reflection_llm.ainvoke(prompt)
-        verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
+        if verdict_model is None:
+            logging.error("--- 反思器嚴重錯誤: 模型未能生成有效的裁決 (可能觸發了內容安全審核). ---")
+            verdict = {
+                "summary": "Reflection failed: The model did not return a valid verdict.",
+                "new_status": "failed",
+                "next_action": "REPLAN",
+                "reasoning": "The reflection model returned no output, possibly due to content safety filters or an API error."
+            }
+        else:
+            verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
+        
         next_action = verdict.get('next_action', 'REPLAN').upper()
         logging.info(f"--- 反思決策: {next_action}. 理由: {verdict.get('reasoning', 'N/A')} ---")
         updated_plan = update_plan_status(plan, goal_id, verdict, raw_result) # pyright: ignore[reportArgumentType]
@@ -388,7 +433,12 @@ def create_master_graph():
     def route_from_executive(state: AgentState):
         if state.get("is_human_intervention_needed") or not state.get("plan"):
             return "human_intervention"
-        if not find_next_executable_goal(state['plan']): # pyright: ignore[reportArgumentType]
+        plan = state['plan']
+        assert plan is not None, "Plan cannot be None when routing from executive"
+        if is_plan_stuck(plan):
+            logging.warning("--- 執行官：偵測到計畫卡住，強制重新規劃！ ---")
+            return "meta_planner"
+        if not find_next_executable_goal(plan):
             return "synthesizer"
         return "executor"
 
