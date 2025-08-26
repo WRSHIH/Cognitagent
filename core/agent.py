@@ -5,12 +5,13 @@ from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional
 from functools import lru_cache
 
 from langgraph.graph import StateGraph, END, START
+from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-# 導入我們集中管理的 LLM 服務和工具列表
+# 導入LLM 服務和工具列表
 from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, get_langchain_gemini_flash_lite
 from core.tool_registry import ALL_TOOLS
 from core.tools.web_search import search_tool
@@ -21,7 +22,6 @@ from core.utils import load_prompt
 class RouteDecision(BaseModel):
     decision: Literal["simple_query", "complex_task"] = Field(description="根據使用者目標的複雜度，決定要走的路徑。")
     reasoning: str = Field(description="做出此決策的簡要理由，不超過 30 字。")
-
 
 class ToolSelection(BaseModel):
     tool_name: str = Field(description="從可用工具列表中選擇的最合適的工具的確切名稱。")
@@ -43,17 +43,20 @@ class Verdict(BaseModel):
     summary: str = Field(description="A brief summary of the sub-task's result.")
     new_status: str = Field(description="The new status for the sub-goal, e.g., 'completed' or 'failed'.")
     next_action: str = Field(description="The next action to take: 'CONTINUE', 'REPLAN', or 'ABORT'.")
+    reasoning: str = Field(description="A detailed reasoning for your decision.")
 
 class AgentState(TypedDict):
     main_goal: str
     plan: Union[HierarchicalPlan, None]
     working_memory: Annotated[dict, lambda left, right: {**left, **right}]
     current_sub_goal_id: Union[int, None]
+    sub_goal_failure_counts: Annotated[dict, lambda left, right: {**left, **right}]
     sub_task_raw_result: Union[dict, str, None]
     replan_count: int
     is_human_intervention_needed: bool
     response: str
     route_decision: str
+    
 
 # 輔助函式
 def find_next_executable_goal(plan: HierarchicalPlan) -> Union[SubGoal, None]:
@@ -112,9 +115,10 @@ def update_plan_status(plan: HierarchicalPlan, goal_id: int, verdict: dict, raw_
 
 # 核心及子圖節點的
 class AgentNodes:
-    def __init__(self, max_replans=3, tools: Optional[List[BaseTool]] = None):
+    def __init__(self, max_replans=3, max_subgoal_retries=2, tools: Optional[List[BaseTool]] = None):
         self.MAX_REPLANS = max_replans
-        self.tool = {tool.name: tool for tool in ALL_TOOLS}
+        self.MAX_SUBGOAL_RETRIES = max_subgoal_retries
+        self.tool = {tool.name: tool for tool in tools}
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
@@ -221,6 +225,7 @@ class AgentNodes:
                 }
             logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---") # pyright: ignore[reportAttributeAccessIssue]
             return {"plan": plan, "is_human_intervention_needed": False}
+        
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
             return {"is_human_intervention_needed": True, "response": f"Fatal error in planning: {e}"}
@@ -281,7 +286,6 @@ class AgentNodes:
             logging.error(f"[{chosen_tool_name}] 工具執行失敗: {e}")
             return {"sub_task_raw_result": f"Error executing tool '{chosen_tool_name}': {e}"}
 
-
     async def reflection_node(self, state: AgentState) -> dict:
         logging.info("--- 高級反思器：評估子任務結果 ---")
         goal_id = state['current_sub_goal_id']
@@ -292,65 +296,94 @@ class AgentNodes:
         current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
         working_memory_str = json.dumps(state.get('working_memory', {}), indent=2, ensure_ascii=False)
         raw_result = str(state.get('sub_task_raw_result', ''))
+        failure_counts = state.get('sub_goal_failure_counts', {})
+        current_failures = failure_counts.get(goal_id, 0)
+        is_fatal_error = raw_result.strip().startswith("FATAL:")
 
-        prompt = f"""
-        你是一位經驗豐富的專案經理，你的核心職責是評估子任務的執行結果，並決定專案的下一步走向。
-        你需要有智慧地判斷，而不是機械地追求完美。
-
-        **1. 專案的完整上下文:**
-        - **總體目標 (Main Goal):** {main_goal}
-        - **當前子目標 (Current Sub-goal):** {current_goal.description}
-        - **已知的背景資訊 (Working Memory):** ```json
-          {working_memory_str}
-          ```
-        - **子任務的原始執行結果 (Result to Evaluate):** ```
-          {raw_result[:2500]}
-          ```
-          
-        **2. 你的決策框架 (DECISION FRAMEWORK):**
-        - **A. 任務類型判斷 (Task Type Analysis):**
-          - 這是**初步的資訊蒐集任務**嗎 (例如，使用搜尋工具)？
-          - 還是**後續的處理/分析任務** (例如，整理、規劃、總結)？
-
-        - **B. 核心評估標準 (CRITICAL EVALUATION CRITERIA):**
-          - **對於資訊蒐集任務:**
-            - **相關性 (Relevance):** 結果是否與「當前子目標」高度相關？
-            - **充分性 (Sufficiency):** 結果是否提供了【足夠的基礎資訊】，讓【下一個】子任務可以繼續進行？(注意：這裡不需要「完全詳盡」，只需要「足夠下一步」即可)。
-          - **對於處理/分析任務:**
-            - **目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
-            - **品質 (Quality):** 結果是否清晰、結構化且沒有明顯錯誤？
-
-        - **C. 內容安全審核 (Content Safety Check):**
-            - 結果中是否包含任何不當、攻擊性、或帶有強烈偏見的內容？
-
-        **3. 你的行動指令 (ACTIONABLE INSTRUCTIONS):**
-        - **第一步：生成摘要 (Generate Summary):**
-          - 無論你的最終決策是什麼，都必須先根據「子任務的原始執行結果」，生成一份【客觀、中立、安全】的摘要，移除所有主觀或不安全的內容。
-        - **第二步：做出裁決 (Make a Verdict):**
-          - 如果結果是**完全無關**的、**錯誤的**，或包含**不安全內容**，則你的決策是 `REPLAN`。
-          - 對於**資訊蒐集任務**，只要結果滿足【相關性】和【充分性】，即使不夠完美，你的決策也【應該是 `CONTINUE`】，以推動專案進程。
-          - 對於**處理/分析任務**，你需要更嚴格地評估其【目標達成度】和【品質】，若不滿足則決策為 `REPLAN`。
-          - 在絕大多數情況下，只要我們獲得了有用的新資訊，就應該選擇 `CONTINUE`。
-
-        請以 JSON 格式回傳你的最終分析報告。JSON 必須包含以下欄位：
-        - "summary": (字串) 你生成的【安全且中立】的摘要。
-        - "new_status": (字串) 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
-        - "next_action": (字串) 你的最終決策：'CONTINUE' 或 'REPLAN'。
-        - "reasoning": (字串) 你做出此決策的詳細理由，必須明確引用上述的決策框架。
-        """
-        structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
-        verdict_model = await structured_reflection_llm.ainvoke(prompt)
-        if verdict_model is None:
-            logging.error("--- 反思器嚴重錯誤: 模型未能生成有效的裁決 (可能觸發了內容安全審核). ---")
+        if is_fatal_error:
+            logging.error(f"--- 反思器：偵測到子任務 {goal_id} 的致命錯誤，將直接判定失敗。---")
             verdict = {
-                "summary": "Reflection failed: The model did not return a valid verdict.",
+                "summary": f"工具執行遭遇不可恢復的錯誤: {raw_result}",
                 "new_status": "failed",
-                "next_action": "REPLAN",
-                "reasoning": "The reflection model returned no output, possibly due to content safety filters or an API error."
+                "next_action": "ABORT", # 強制中止
+                "reasoning": "A fatal, non-recoverable error was returned by the tool."
             }
         else:
-            verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
+            prompt = f"""
+            你是一位經驗豐富的專案經理，你的核心職責是評估子任務的執行結果，並決定專案的下一步走向。
+            你需要有智慧地判斷，而不是機械地追求完美。
+
+            **1. 專案的完整上下文:**
+            - **總體目標 (Main Goal):** {main_goal}
+            - **當前子目標 (Current Sub-goal):** {current_goal.description}
+            - **已知的背景資訊 (Working Memory):** ```json
+            {working_memory_str}
+            ```
+            - **子任務的原始執行結果 (Result to Evaluate):** ```
+            {raw_result[:2500]}
+            ```
+            
+            **2. 你的決策框架 (DECISION FRAMEWORK):**
+            - **A. 任務類型判斷 (Task Type Analysis):**
+            - 這是**初步的資訊蒐集任務**嗎 (例如，使用搜尋工具)？
+            - 還是**後續的處理/分析任務** (例如，整理、規劃、總結)？
+
+            - **B. 核心評估標準 (CRITICAL EVALUATION CRITERIA):**
+            - **對於資訊蒐集任務:**
+                - **相關性 (Relevance):** 結果是否與「當前子目標」高度相關？
+                - **充分性 (Sufficiency):** 結果是否提供了【足夠的基礎資訊】，讓【下一個】子任務可以繼續進行？(注意：這裡不需要「完全詳盡」，只需要「足夠下一步」即可)。
+            - **對於處理/分析任務:**
+                - **目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
+                - **品質 (Quality):** 結果是否清晰、結構化且沒有明顯錯誤？
+
+            - **C. 內容安全審核 (Content Safety Check):**
+                - 結果中是否包含任何不當、攻擊性、或帶有強烈偏見的內容？
+
+            **3. 你的行動指令 (ACTIONABLE INSTRUCTIONS):**
+            - **第一步：生成摘要 (Generate Summary):**
+            - 無論你的最終決策是什麼，都必須先根據「子任務的原始執行結果」，生成一份【客觀、中立、安全】的摘要，移除所有主觀或不安全的內容。
+            - **第二步：做出裁決 (Make a Verdict):**
+            - 如果結果是**完全無關**的、**錯誤的**，或包含**不安全內容**，則你的決策是 `REPLAN`。
+            - 對於**資訊蒐集任務**，只要結果滿足【相關性】和【充分性】，即使不夠完美，你的決策也【應該是 `CONTINUE`】，以推動專案進程。
+            - 對於**處理/分析任務**，你需要更嚴格地評估其【目標達成度】和【品質】，若不滿足則決策為 `REPLAN`。
+            - 在絕大多數情況下，只要我們獲得了有用的新資訊，就應該選擇 `CONTINUE`。
+
+            請以 JSON 格式回傳你的最終分析報告。JSON 必須包含以下欄位：
+            - "summary": (字串) 你生成的【安全且中立】的摘要。
+            - "new_status": (字串) 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
+            - "next_action": (字串) 你的最終決策：'CONTINUE' 或 'REPLAN'。
+            - "reasoning": (字串) 你做出此決策的詳細理由，必須明確引用上述的決策框架。
+            """
+            structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
+            verdict_model = await structured_reflection_llm.ainvoke(prompt)
+            if verdict_model is None:
+                logging.error("--- 反思器嚴重錯誤: 模型未能生成有效的裁決 (可能觸發了內容安全審核). ---")
+                verdict = {
+                    "summary": "Reflection failed: The model did not return a valid verdict.",
+                    "new_status": "failed",
+                    "next_action": "REPLAN",
+                    "reasoning": "The reflection model returned no output, possibly due to content safety filters or an API error."
+                }
+            else:
+                verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
         
+        # 處理失敗計數與決策覆寫
+        if verdict.get('new_status') == 'failed' or verdict.get('next_action') == 'ABORT':
+            current_failures += 1
+            failure_counts[goal_id] = current_failures
+            logging.warning(f"--- 反思器：子任務 {goal_id} 失敗。這是第 {current_failures} 次失敗。---")
+
+            if current_failures >= self.MAX_SUBGOAL_RETRIES:
+                logging.error(f"--- 反思器：子任務 {goal_id} 已達最大重試次數 ({self.MAX_SUBGOAL_RETRIES})。強制中止！---")
+                final_response_message = f"代理程式中止：子任務 '{current_goal.description}' 在嘗試 {current_failures} 次後仍然失敗。"
+                updated_plan = update_plan_status(plan, goal_id, verdict, raw_result)
+                return {
+                    "plan": updated_plan,
+                    "is_human_intervention_needed": True,
+                    "response": final_response_message,
+                    "sub_goal_failure_counts": failure_counts
+                }
+
         next_action = verdict.get('next_action', 'REPLAN').upper()
         logging.info(f"--- 反思決策: {next_action}. 理由: {verdict.get('reasoning', 'N/A')} ---")
         updated_plan = update_plan_status(plan, goal_id, verdict, raw_result) # pyright: ignore[reportArgumentType]
@@ -369,7 +402,8 @@ class AgentNodes:
             "working_memory": {**state.get('working_memory',{}), f"goal_{goal_id}_summary": summary},
             "next_action": next_action,
             "replan_count": replan_count,
-            "sub_task_raw_result": None
+            "sub_task_raw_result": None,
+            "sub_goal_failure_counts": failure_counts
         }
 
     async def synthesizer_node(self, state: AgentState) -> dict:
@@ -400,7 +434,7 @@ class AgentNodes:
 def create_master_graph():
     logging.info("正在初始化 Production-Grade DEHP Agent Graph...")
     
-    nodes = AgentNodes(max_replans=3)
+    nodes = AgentNodes(max_replans=3, max_subgoal_retries=2, tools = ALL_TOOLS)
     workflow = StateGraph(AgentState)
 
     workflow.add_node("router", nodes.router_node)
@@ -413,9 +447,9 @@ def create_master_graph():
     workflow.add_node("human_intervention", nodes.human_intervention_node)
 
     workflow.add_edge(START, "router")
+
     def route_logic(state: AgentState):
         return state["route_decision"]
-    
     workflow.add_conditional_edges(source="router",
                                    path=route_logic,
                                    path_map={"simple_query": "simple_executor",
@@ -427,7 +461,6 @@ def create_master_graph():
         if state.get("is_human_intervention_needed"):
             return "human_intervention"
         return "executive"
-    
     workflow.add_conditional_edges(source="meta_planner", path=route_from_planner)
     
     def route_from_executive(state: AgentState):
@@ -441,8 +474,8 @@ def create_master_graph():
         if not find_next_executable_goal(plan):
             return "synthesizer"
         return "executor"
-
     workflow.add_conditional_edges("executive", route_from_executive)
+
     workflow.add_edge("executor", "reflector")
 
     def route_from_reflector(state: AgentState):
@@ -452,14 +485,11 @@ def create_master_graph():
         if next_action and next_action.upper() == "REPLAN": # pyright: ignore[reportOptionalMemberAccess]
             return "meta_planner"
         return "executive" # CONTINUE
-    
     workflow.add_conditional_edges("reflector", route_from_reflector)
+
     workflow.add_edge("synthesizer", END)
     workflow.add_edge("human_intervention", END)
-    
-    from langgraph.checkpoint.memory import InMemorySaver
     memory = InMemorySaver()
-    
     return workflow.compile(checkpointer=memory)
 
 
