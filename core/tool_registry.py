@@ -8,6 +8,7 @@ ALL_TOOLS = [
     DeepResearchKnowledgeBase,
     search_tool,
     SaveNewKnowledgeTool,
+    cognitive_processor_tool,
 ]
 
 print(f"✅ Tool registry initialized. Found {len(ALL_TOOLS)} tools.")

@@ -16,6 +16,8 @@ from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, 
 from core.tool_registry import ALL_TOOLS
 from core.utils import load_prompt
 
+system_prompt_content = load_prompt("agent_system.txt") 
+
 # 狀態和結構的定義
 class RouteDecision(BaseModel):
     decision: Literal["simple_query", "complex_task"] = Field(description="根據使用者目標的複雜度，決定要走的路徑。")
