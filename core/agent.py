@@ -20,7 +20,7 @@ system_prompt_content = load_prompt("agent_system.txt")
 
 # 狀態和結構的定義
 class RouteDecision(BaseModel):
-    decision: Literal["simple_query", "complex_task"] = Field(description="根據使用者目標的複雜度，決定要走的路徑。")
+    decision: Literal["simple_query", "complex_task", "knowledge_update_task"] = Field(description="根據使用者目標的複雜度，決定要走的路徑。")
     reasoning: str = Field(description="做出此決策的簡要理由，不超過 30 字。")
 
 class ToolSelection(BaseModel):
@@ -119,6 +119,13 @@ class AgentNodes:
         self.MAX_REPLANS = max_replans
         self.MAX_SUBGOAL_RETRIES = max_subgoal_retries
         self.tool = {tool.name: tool for tool in tools}
+        self.prompts = {
+            "core_identity": load_prompt("_core_identity.txt"),
+            "communication_protocol": load_prompt("_communication_protocol.txt"),
+            "planner_framework": load_prompt("planner_framework.txt"),
+            "reflection_framework": load_prompt("reflection_framework.txt"),
+            "router_prompt": load_prompt("agent_router.txt"),
+        }
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
@@ -453,7 +460,8 @@ def create_master_graph():
     workflow.add_conditional_edges(source="router",
                                    path=route_logic,
                                    path_map={"simple_query": "simple_executor",
-                                             "complex_task": "meta_planner"})
+                                             "complex_task": "meta_planner",
+                                             "knowledge_update_task": "meta_planner"})
     
     workflow.add_edge(start_key="simple_executor", end_key=END)
     
