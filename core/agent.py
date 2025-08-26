@@ -14,8 +14,6 @@ from pydantic import BaseModel, Field
 # 導入LLM 服務和工具列表
 from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, get_langchain_gemini_flash_lite
 from core.tool_registry import ALL_TOOLS
-from core.tools.web_search import search_tool
-from core.tools.rag_tool import DeepResearchKnowledgeBase
 from core.utils import load_prompt
 
 # 狀態和結構的定義

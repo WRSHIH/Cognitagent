@@ -47,6 +47,7 @@ class CognitiveProcessorTool(BaseTool):
         try:
             response = await summarizer_chain.ainvoke({"context": context_str, "task": task})
             compressed_context = str(response.content)
+            print(f"compressed_context: {response}")
             logging.info(f"--- 認知處理工具：上下文成功壓縮，新長度為 {len(compressed_context)} ---")
             return compressed_context
         except Exception as e:
@@ -85,6 +86,7 @@ class CognitiveProcessorTool(BaseTool):
 
         try:
             response = await primary_chain.ainvoke({"context": processed_context_str, "task": task})
+            print(f"主要回應(PRO): {response}")
             logging.info("--- 認知處理工具：成功完成主要任務 ---")
             content: Union[str, List[Union[str, Dict]]] = response.content
             if isinstance(content, list):
@@ -111,6 +113,7 @@ class CognitiveProcessorTool(BaseTool):
                 
                 try:
                     fallback_response = await fallback_chain.ainvoke({"context": processed_context_str})
+                    print(f"備用回應(LITE): {fallback_response}")
                     logging.info("--- 認知處理工具：備用方案成功完成 ---")
                     return str(fallback_response.content)
                 except Exception as fallback_e:
