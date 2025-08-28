@@ -91,9 +91,9 @@ async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
 
     try:
         response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
-        if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}:
-            logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---")
-            return response.tool_name
+        if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}: # pyright: ignore[reportAttributeAccessIssue] # pyright: ignore[reportAttributeAccessIssue]
+            logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
+            return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
         else:
             tool_name_str = getattr(response, 'tool_name', 'None')
             logging.warning(f"--- LLM 路由警告: 模型回傳了無效或不存在的工具 '{tool_name_str}'。將啟用備用方案。 ---")
@@ -118,13 +118,14 @@ class AgentNodes:
     def __init__(self, max_replans=3, max_subgoal_retries=2, tools: Optional[List[BaseTool]] = None):
         self.MAX_REPLANS = max_replans
         self.MAX_SUBGOAL_RETRIES = max_subgoal_retries
-        self.tool = {tool.name: tool for tool in tools}
+        self.tool = {tool.name: tool for tool in tools} # pyright: ignore[reportOptionalIterable]
         self.prompts = {
             "core_identity": load_prompt("_core_identity.txt"),
             "communication_protocol": load_prompt("_communication_protocol.txt"),
+            "router_prompt": load_prompt("agent_router.txt"),
+            "simple_query_prompt": load_prompt("simple_query_executor.txt"),
             "planner_framework": load_prompt("planner_framework.txt"),
             "reflection_framework": load_prompt("reflection_framework.txt"),
-            "router_prompt": load_prompt("agent_router.txt"),
         }
     
     async def router_node(self, state: AgentState) -> dict:
@@ -132,14 +133,11 @@ class AgentNodes:
         goal = state['main_goal']        
         try:
             router_llm = get_langchain_gemini_flash_lite().with_structured_output(RouteDecision)
-            router_prompt = load_prompt("agent_router.txt")
-            formatted_prompt = router_prompt.format(goal=goal)
-            response = await router_llm.ainvoke(formatted_prompt)
+            response = await router_llm.ainvoke(self.prompts["router_prompt"].format(goal=goal))
             return {"route_decision": response.decision} # pyright: ignore[reportAttributeAccessIssue]
         
         except Exception as e:
             logging.warning(f"--- LLM 路由判斷失敗: {e}. 降級至規則判斷模式。 ---")
-
             if any(keyword in goal for keyword in ["分析", "比較", "總結", "規劃", "報告", "研究"]) or len(goal) > 80:
                 logging.info(f"--- 規則決策：複雜任務 -> 啟動規劃流程 ---")
                 return {"route_decision": "complex_task"}
@@ -149,19 +147,19 @@ class AgentNodes:
 
     async def simple_query_executor_node(self, state: AgentState) -> dict:
         logging.info("--- 快速路徑：直接執行簡單查詢 ---")
-        goal = state['main_goal']
+        messages = [SystemMessage(content=self.prompts["simple_query_prompt"]),
+                    HumanMessage(content=state['main_goal']),]
         try:
             llm_with_tools = get_langchain_gemini_flash_lite().bind_tools(ALL_TOOLS)
             logging.info("--- 快速路徑：LLM 正在決策... ---")
-            response_message = await llm_with_tools.ainvoke(goal)
+            response_message = await llm_with_tools.ainvoke(messages)
             if response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
                 logging.info(f"--- 快速路徑：偵測到工具呼叫: {[tc['name'] for tc in response_message.tool_calls]} ---") # pyright: ignore[reportAttributeAccessIssue]
-
                 tool_messages = []
+                
                 for tool_call in response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
                     tool_name = tool_call.get('name')
                     tool_to_call = self.tool.get(tool_name)
-                    
                     observation = ""
                     if not tool_to_call:
                         error_msg = f"錯誤：模型嘗試呼叫一個不存在的工具 '{tool_name}'。"
@@ -170,15 +168,15 @@ class AgentNodes:
                     else:
                         try:
                             logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
-                            # 執行工具並取得結果
                             observation = await tool_to_call.ainvoke(tool_call['args'])
                         except Exception as e:
                             observation = f"工具 '{tool_name}' 執行時發生錯誤: {e}"
                             logging.error(observation)
-
                     tool_messages.append(ToolMessage(content=str(observation), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
+                
+                messages.extend(tool_messages)
                 logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
-                final_response_message = await llm_with_tools.ainvoke([HumanMessage(content=goal), response_message] + tool_messages)
+                final_response_message = await llm_with_tools.ainvoke(messages)
                 logging.info(f"--- 快速路徑：最終生成的回覆內容: '{final_response_message.content}' ---")
                 return {"response": final_response_message.content}
             
