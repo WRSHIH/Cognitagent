@@ -27,6 +27,11 @@ class ToolSelection(BaseModel):
     tool_name: str = Field(description="從可用工具列表中選擇的最合適的工具的確切名稱。")
     reasoning: str = Field(description="對為什麼選擇這個工具的簡要說明（約 25 字）。")
 
+class ExecutiveDecision(BaseModel):
+    decision: Literal["CONTINUE", "REPLAN", "SYNTHESIZE"] = Field(description="根據當前計畫狀態和工作記憶體做出的核心決策。")
+    next_goal_id: Optional[int] = Field(None, description="如果決策是 'CONTINUE'，則指定下一個要執行的子目標 ID。")
+    reasoning: str = Field(description="做出此決策的簡要理由，用於日誌記錄和除錯。")
+
 class SubGoal(BaseModel):
     goal_id: int
     description: str
@@ -119,14 +124,10 @@ class AgentNodes:
         self.MAX_REPLANS = max_replans
         self.MAX_SUBGOAL_RETRIES = max_subgoal_retries
         self.tool = {tool.name: tool for tool in tools} # pyright: ignore[reportOptionalIterable]
-        self.prompts = {
-            "core_identity": load_prompt("_core_identity.txt"),
-            "communication_protocol": load_prompt("_communication_protocol.txt"),
-            "router_prompt": load_prompt("agent_router.txt"),
-            "simple_query_prompt": load_prompt("simple_query_executor.txt"),
-            "planner_framework": load_prompt("planner_framework.txt"),
-            "reflection_framework": load_prompt("reflection_framework.txt"),
-        }
+        self.prompts = {"router_prompt": load_prompt("agent_router.txt"),
+                        "simple_query_prompt": load_prompt("agent_simple_executor.txt"),
+                        "planner_prompt": load_prompt("agent_planner.txt"),
+                        "executive_prompt": load_prompt("agent_executive.txt"),}
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
@@ -193,44 +194,23 @@ class AgentNodes:
         logging.info("--- 元規劃器：生成/更新高階策略樹 ---")
         structured_planner_llm = get_langchain_gemini_flash().with_structured_output(HierarchicalPlan)
         previous_plan_summary = ""
-        if state.get('plan'):
-            previous_plan_summary = f"Previous plan execution summary: {json.dumps(state['working_memory'], indent=2)}. Please refine the plan based on this."
-        formatted_tools_for_planner = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tool.values()])
-        prompt = f"""
-        你是專案的總策劃師。你的任務是根據使用者的最終目標，將其分解為一系列清晰、可執行的子目標，並規劃出一個策略樹。
-
-        在規劃時，你必須考慮以下可用的工具集：
-        --- 工具列表 ---
-        {formatted_tools_for_planner}
-        --- 結束列表 ---
-
-        **規劃指南:**
-        1.  **外部資訊獲取**: 當需要從網路、知識庫獲取新資訊時，規劃使用 `tavily_search` 或 `DeepResearchKnowledgeBase`。
-        2.  **內部資訊處理**: 當你需要對【已經蒐集到的資訊】進行整理、分類、分組、總結或任何形式的轉換時，你【必須】規劃一個使用 `CognitiveProcessorTool` 的步驟。這是唯一的內部處理工具。
-        3.  **依賴關係**: 明確定義每個子目標的依賴關係。例如，在整理資訊之前，必須先完成資訊的蒐集。
-        4.  **【極度重要】狀態欄位**: `status` 是一個機器讀取的欄位。對於所有新建立的、尚未執行的子目標，其 `status` 的值【必須】設定為英文單字 "todo"。
-
-        **使用者的最終目標:** {state['main_goal']}
-        {previous_plan_summary}
-
-        你的回應必須是一個嚴格遵守 HierarchicalPlan 結構的 JSON 物件，不要包含任何額外的解釋。
-        """
-
+        if state.get('plan') and state.get('working_memory'):
+            previous_plan_summary = ("先前的計畫執行遭遇困難或結果不佳。以下是相關的歷史執行摘要，請務必基於此進行根源分析並提出改良計畫：\n"
+                                     f"```json\n{json.dumps(state['working_memory'], indent=2, ensure_ascii=False)}\n```")
+        prompt = self.prompts["planner_system"].format(main_goal=state['main_goal'],
+                                                       previous_plan_summary=previous_plan_summary,)
+        logging.info(f"--- [DEBUG] 準備發送給 Planner 的最終提示詞: ---\n{prompt}\n--- [DEBUG] ---")
+        
         try:
             plan = await structured_planner_llm.ainvoke(prompt)
-
             plan_dict = plan.model_dump() if hasattr(plan, 'model_dump') else plan # pyright: ignore[reportAttributeAccessIssue]
             logging.info(f"--- [DEBUG] 元規劃器生成的計畫詳情: ---\n{json.dumps(plan_dict, indent=2, ensure_ascii=False)}\n--- [DEBUG] ---")
-            
             if not plan or not plan.sub_goals: # pyright: ignore[reportAttributeAccessIssue]
                 logging.error("元規劃器未能生成有效的計畫內容 (回傳為空或沒有子目標)。")
-                return {
-                    "is_human_intervention_needed": True,
-                    "response": "Fatal error in planning: The meta planner failed to generate a valid plan structure."
-                }
+                return {"is_human_intervention_needed": True,
+                        "response": "Fatal error in planning: The meta planner failed to generate a valid plan structure.",}
             logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---") # pyright: ignore[reportAttributeAccessIssue]
             return {"plan": plan, "is_human_intervention_needed": False}
-        
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
             return {"is_human_intervention_needed": True, "response": f"Fatal error in planning: {e}"}
