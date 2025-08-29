@@ -1,4 +1,3 @@
-import operator
 import logging
 import json
 from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional
@@ -215,22 +214,52 @@ class AgentNodes:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
             return {"is_human_intervention_needed": True, "response": f"Fatal error in planning: {e}"}
 
-    def executive_node(self, state: AgentState) -> dict:
-        logging.info("--- 執行官：決策下一子任務 ---")
+    async def executive_node(self, state: AgentState) -> dict:
+        logging.info("--- 執行官：由 LLM 評估計畫並決策下一步 ---")
         if state.get('is_human_intervention_needed'):
+            logging.warning("--- 執行官：偵測到需要人工介入，跳過決策 ---")
             return {}
         plan = state.get('plan')
         if not plan:
-            logging.warning("--- 執行官：未找到有效計畫，任務終止 ---")
+            logging.error("--- 執行官：未找到有效計畫，任務終止 ---")
             return {"is_human_intervention_needed": True, "response": "Execution stopped due to a missing plan."}
-        next_goal = find_next_executable_goal(plan)
-        if next_goal:
-            logging.info(f"--- 執行官：分派子任務 '{next_goal.description}' ---")
-            return {"current_sub_goal_id": next_goal.goal_id}
-        else:
-            logging.info("--- 執行官：所有任務完成，準備綜合報告 ---")
-            return {}
+        plan_json = json.dumps(plan.model_dump(), indent=2, ensure_ascii=False)
+        working_memory_json = json.dumps(state.get('working_memory', {}), indent=2, ensure_ascii=False)
+        prompt = self.prompts["executive_prompt"].format(main_goal=state['main_goal'],
+                                                         plan_json=plan_json,
+                                                         working_memory_json=working_memory_json)
+        try:
+            structured_executive_llm = get_langchain_gemini_flash().with_structured_output(ExecutiveDecision)
+            logging.info("--- 執行官：正在請求 LLM 進行 A.C.T. 決策... ---")
+            response_model = await structured_executive_llm.ainvoke(prompt)
+            decision = response_model.decision # pyright: ignore[reportAttributeAccessIssue]
+            reasoning = response_model.reasoning # pyright: ignore[reportAttributeAccessIssue]
+            next_goal_id = response_model.next_goal_id # pyright: ignore[reportAttributeAccessIssue]
+            logging.info(f"--- 執行官 LLM 決策: '{decision}'. 理由: {reasoning} ---")
 
+            if decision == "CONTINUE":
+                if next_goal_id is None:
+                    logging.error("--- 執行官錯誤：決策為 CONTINUE 但未提供 next_goal_id，強制重新規劃 ---")
+                    return {"next_action": "REPLAN"}
+                logging.info(f"--- 執行官：分派子任務 ID '{next_goal_id}' ---")
+                return {"current_sub_goal_id": next_goal_id}
+            
+            elif decision == "REPLAN":
+                logging.warning("--- 執行官：根據 LLM 判斷，計畫需要重新規劃 ---")
+                return {"next_action": "REPLAN"} 
+
+            elif decision == "SYNTHESIZE":
+                logging.info("--- 執行官：所有任務完成，準備綜合報告 ---")
+                return {"current_sub_goal_id": None}
+            
+            else:
+                logging.error(f"--- 執行官：收到未知的 LLM 決策 '{decision}'，觸發重新規劃作為備用方案 ---")
+                return {"next_action": "REPLAN"}
+
+        except Exception as e:
+            logging.error(f"--- 執行官節點 LLM 決策失敗: {e}。將觸發重新規劃。 ---", exc_info=True)
+            return {"next_action": "REPLAN"}
+    
     async def execute_subgraph_node(self, state: AgentState) -> dict:
         goal_id = state['current_sub_goal_id']
         plan = state['plan']
@@ -450,15 +479,18 @@ def create_master_graph():
     workflow.add_conditional_edges(source="meta_planner", path=route_from_planner)
     
     def route_from_executive(state: AgentState):
-        if state.get("is_human_intervention_needed") or not state.get("plan"):
+        if state.get("is_human_intervention_needed"):
             return "human_intervention"
-        plan = state['plan']
-        assert plan is not None, "Plan cannot be None when routing from executive"
-        if is_plan_stuck(plan):
-            logging.warning("--- 執行官：偵測到計畫卡住，強制重新規劃！ ---")
+        if state.get("next_action") == "REPLAN":
             return "meta_planner"
-        if not find_next_executable_goal(plan):
-            return "synthesizer"
+        if state.get("current_sub_goal_id") is None:
+            plan = state.get('plan')
+            if plan and not find_next_executable_goal(plan):
+                 return "synthesizer"
+            else:
+                # 如果 LLM 說完成了，但程式邏輯發現還有未完成的，就強制重新規劃
+                logging.warning("--- 路由：執行官與程式邏輯判斷不一致，強制重新規劃！---")
+                return "meta_planner"
         return "executor"
     workflow.add_conditional_edges("executive", route_from_executive)
 
