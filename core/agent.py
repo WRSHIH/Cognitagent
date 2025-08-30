@@ -133,7 +133,8 @@ class AgentNodes:
                         "planner_prompt": load_prompt("agent_planner.txt"),
                         "executive_prompt": load_prompt("agent_executive.txt"),
                         "execute_prompt": load_prompt("agent_execute.txt"),
-                        "reflector_prompt": load_prompt("agent_reflector.txt")}
+                        "reflector_prompt": load_prompt("agent_reflector.txt"),
+                        "synthesizer_prompt": load_prompt("agent_synthesizer.txt")}
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
@@ -418,7 +419,9 @@ class AgentNodes:
 
     async def synthesizer_node(self, state: AgentState) -> dict:
         logging.info("--- 綜合節點：生成最終報告 ---")
-        final_prompt = f"""Synthesize the results from the working memory into a final answer for the user's goal. Goal: {state['main_goal']}. Working Memory: {json.dumps(state['working_memory'], indent=2, ensure_ascii=False)}"""
+        working_memory_json = json.dumps(state['working_memory'], indent=2, ensure_ascii=False)
+        final_prompt = self.prompts["synthesizer_prompt"].format(main_goal=state['main_goal'],
+                                                                 working_memory_json=working_memory_json)
         logging.info(f"--- [DEBUG] 準備發送給 Synthesizer 的最終提示詞: ---\n{final_prompt}\n--- [DEBUG] ---")
         try:
             response = await get_langchain_gemini_pro().ainvoke(final_prompt)
