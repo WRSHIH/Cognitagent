@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional, Dict
@@ -177,22 +178,33 @@ class AgentNodes:
                         try:
                             logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
                             observation = await tool_to_call.ainvoke(tool_call['args'])
+                            final_result = {f'result{indx+1}': result.get('content') for indx, result in enumerate(observation.get("results"))}
+                            logging.info(f"--- [DEBUG] 工具 '{tool_name}' 的原始回傳結果: {observation} ---")
                         except Exception as e:
-                            observation = f"工具 '{tool_name}' 執行時發生錯誤: {e}"
-                            logging.error(observation)
-                    tool_messages.append(ToolMessage(content=str(observation), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
-                
+                            logging.error(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
+                    tool_messages.append(ToolMessage(content=str(final_result), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
                 messages.extend(tool_messages)
-                logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
-                final_response_message = await llm_with_tools.ainvoke(messages)
-                logging.info(f"--- 快速路徑：最終生成的回覆內容: '{final_response_message.content}' ---")
-                return {"response": final_response_message.content}
+                print(messages)
+                try: 
+                    logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
+                    final_response_message = await llm_with_tools.ainvoke(messages)
+
+                    if not final_response_message.content or not str(final_response_message.content).strip():
+                        logging.warning("--- 快速路徑警告：LLM 綜合整理後回傳空內容，可能觸發了內容審核。---")
+                        return {"response": "抱歉，我在整理搜尋結果時遇到了問題，無法提供最終答案。這可能是由於網路內容觸發了安全機制。"}
+                    logging.info(f"--- 快速路徑：最終生成的回覆內容: '{final_response_message.content}' ---")
+                    return {"response": final_response_message.content}
+                
+                except Exception as e:
+                    logging.error(f"--- 快速路徑錯誤：在綜合整理工具結果時發生異常: {e} ---", exc_info=True)
+                    return {"response": f"抱歉，處理搜尋結果時發生錯誤：{e}"}
             
             else:
                 logging.info("--- 快速路徑：LLM 直接生成回覆 ---")
                 if not response_message.content:
                     return {"response": "模型選擇不使用工具，但未提供直接的回覆。"}
                 return {"response": response_message.content}
+            
         except Exception as e:
             logging.error(f"簡單查詢執行失敗: {e}")
             return {"response": f"處理您的請求時發生錯誤: {e}"}
@@ -511,11 +523,11 @@ def create_master_graph():
 
 
 if __name__ == "__main__":
-    Actions = AgentNodes(max_replans=3)
+    Actions = AgentNodes(max_replans=3, max_subgoal_retries=2, tools = ALL_TOOLS)
     Query = {"main_goal": "鐵達尼號的導演是誰"}
     # Actions.router_node(Query)
     Query_from_route = {"main_goal": "鐵達尼號的導演是誰", "route_decision": 'simple_query'}
-    # print(Actions.simple_query_executor_node(Query_from_route))
+    print(asyncio.run(Actions.simple_query_executor_node(Query_from_route)))
     # planner_Res = Actions.meta_planner_node(Query)
     # print(planner_Res)
     # After_planner_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 

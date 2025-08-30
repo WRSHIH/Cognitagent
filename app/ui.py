@@ -51,7 +51,6 @@ async def chat_client(message: str, history: list, thread_id: str | None):
                         try:
                             data_str = line[len('data:'):].strip()
                             event_data = json.loads(data_str)
-                            # print(f"--- [FRONTEND RECEIVED]: {event_data} ---")
 
                             if event_data.get("type") == "thread_id" and not thread_id:
                                 thread_id = event_data.get("id")
@@ -60,22 +59,23 @@ async def chat_client(message: str, history: list, thread_id: str | None):
                             agent_log += format_log_message(event_data)
                             
                             # 如果是 LLM 的回應，更新聊天視窗的內容
-                            content = ""
                             if event_data.get("type") == "final_answer":
                                 content = event_data.get("data", {}).get("content", "")
-                            elif event_data.get("type") == "on_chat_model_end":
-                                llm_output = event_data.get("data", {}).get("output", {})
-                                if isinstance(llm_output, dict):
-                                    try:
-                                        content = llm_output['generations'][0][0]['message']['content']
-                                    except (KeyError, IndexError, TypeError):
-                                        # 如果失敗，則回退到解析簡單結構
-                                        content = llm_output.get("content", "")
-                            if content:
-                                history[-1][1] = content
+                                if content:
+                                    history[-1][1] = content
+                            # elif event_data.get("type") == "on_chat_model_end":
+                            #     llm_output = event_data.get("data", {}).get("output", {})
+                            #     if isinstance(llm_output, dict):
+                            #         try:
+                            #             content = llm_output['generations'][0][0]['message']['content']
+                            #         except (KeyError, IndexError, TypeError):
+                            #             # 如果失敗，則回退到解析簡單結構
+                            #             content = llm_output.get("content", "")
+                            # if content:
+                            #     history[-1][1] = content
                             yield history, agent_log, thread_id, ""
                         except json.JSONDecodeError:
-                            continue # 忽略無法解析的行
+                            continue
     except httpx.ConnectError as e:
         history[-1][1] = f"無法連接到後端 API: {API_URL}。請確認後端服務是否已啟動。\n{e}"
         yield history, agent_log, thread_id, ""
