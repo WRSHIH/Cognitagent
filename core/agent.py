@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional
+from typing import TypedDict, Annotated, List, Union, Any, Literal, Optional, Dict
 from functools import lru_cache
 
 from langgraph.graph import StateGraph, END, START
@@ -30,6 +30,11 @@ class ExecutiveDecision(BaseModel):
     decision: Literal["CONTINUE", "REPLAN", "SYNTHESIZE"] = Field(description="根據當前計畫狀態和工作記憶體做出的核心決策。")
     next_goal_id: Optional[int] = Field(None, description="如果決策是 'CONTINUE'，則指定下一個要執行的子目標 ID。")
     reasoning: str = Field(description="做出此決策的簡要理由，用於日誌記錄和除錯。")
+
+class ToolCallDecision(BaseModel):
+    thought: str = Field(description="簡潔闡述 A.C.A. 思考過程，說明對目標成果的理解、選擇工具的理由，以及關鍵參數的『合成』方式。")
+    tool_name: str = Field(description="從可用工具列表中選擇的、最適合的工具的確切名稱。如果沒有合適的，則為 'GeneralLLM'。")
+    tool_input: Dict[str, Any] = Field(description="為該工具精心組裝的、嚴格符合其 Schema 且內容經過優化的 JSON 物件參數。")
 
 class SubGoal(BaseModel):
     goal_id: int
@@ -266,40 +271,68 @@ class AgentNodes:
         plan = state['plan']
         assert plan is not None, "Plan cannot be None in executor"
         assert goal_id is not None, "Goal ID cannot be None in executor"
+        current_goal = next((g for g in plan.sub_goals if g.goal_id == goal_id), None)
+        if not current_goal:
+            return {"sub_task_raw_result": f"FATAL: Could not find sub-goal with ID {goal_id} in the plan."}
+        logging.info(f"--- 智慧執行核心：開始處理子目標 #{goal_id} '{current_goal.description}' ---")
         
-        current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
-        chosen_tool_name = await get_specialist_for_goal_llm(current_goal)
-        logging.info(f"--- 專家 [{chosen_tool_name}]: 開始處理 '{current_goal.description}' ---")
+        main_goal = state.get('main_goal', '')
+        working_memory = state.get('working_memory', {})
+        formatted_tools = []
+        for tool in self.tool.values():
+            tool_schema = {"name": tool.name,
+                           "description": tool.description,
+                           "parameters": tool.get_input_schema().model_json_schema(),}
+            formatted_tools.append(json.dumps(tool_schema, indent=2, ensure_ascii=False))
+        available_tools_str = "\n---\n".join(formatted_tools)
+        system_message = SystemMessage(content=self.prompts["execute_prompt"])
+        human_prompt_content = f"""
+                                    **[輸入]**
+                                    - **總體目標 (`main_goal`)**: {main_goal}
+                                    - **當前子目標 (`current_sub_goal`)**: {json.dumps(current_goal.model_dump(), ensure_ascii=False)}
+                                    - **目前工作記憶體 (`working_memory`)**: {json.dumps(working_memory, indent=2, ensure_ascii=False)}
+                                    - **所有可用工具 (`available_tools`)**: {available_tools_str}
+                                    ---
+                                    **[你的輸出]**
+                                    請嚴格按照指令，生成包含 `thought`, `tool_name` 和 `tool_input` 的 JSON 物件。
+                                """
+        human_message = HumanMessage(content=human_prompt_content)
+        prompt_template = ChatPromptTemplate.from_messages([system_message, human_message])
+        executor_llm = get_langchain_gemini_flash().with_structured_output(ToolCallDecision)
+        chain = prompt_template | executor_llm
         
         try:
-            if chosen_tool_name and chosen_tool_name in self.tool:
+            logging.info("--- 智慧執行核心：請求 LLM 進行 A.C.A 決策... ---")
+            response_model = await chain.ainvoke({})
+            thought = response_model.thought # pyright: ignore[reportAttributeAccessIssue]
+            chosen_tool_name = response_model.tool_name # pyright: ignore[reportAttributeAccessIssue]
+            tool_input = response_model.tool_input # pyright: ignore[reportAttributeAccessIssue]
+
+            logging.info(f"--- LLM 決策完成 ---")
+            logging.info(f"  - 思考過程: {thought}")
+            logging.info(f"  - 選擇工具: '{chosen_tool_name}'")
+            logging.info(f"  - 合成參數: {tool_input}")
+
+            if chosen_tool_name in self.tool:
                 tool_to_call = self.tool[chosen_tool_name]
-                tool_schema_properties = tool_to_call.get_input_schema().schema().get('properties', {})
-                invoke_input = {}
-                if 'context' in tool_schema_properties:
-                    invoke_input['context'] = state.get('working_memory', {})
-                primary_input_key = next((key for key in tool_schema_properties if key != 'context'), None)
-                if primary_input_key:
-                    invoke_input[primary_input_key] = current_goal.description
-                if len(tool_schema_properties) == 1 and 'context' not in tool_schema_properties:
-                    single_key = list(tool_schema_properties.keys())[0]
-                    final_input = {single_key: current_goal.description}
-                elif not invoke_input and tool_schema_properties:
-                     logging.warning(f"--- 執行官警告: 無法為工具 '{chosen_tool_name}' 建構有效的輸入。")
-                     final_input = current_goal.description
-                else:
-                    final_input = invoke_input
-                logging.info(f"--- 執行官：準備以如下參數呼叫工具 '{chosen_tool_name}': {list(final_input.keys()) if isinstance(final_input, dict) else 'String Input'} ---")
-                result = await tool_to_call.ainvoke(final_input)
+                logging.info(f"--- 正在執行工具 '{chosen_tool_name}'... ---")
+                result = await tool_to_call.ainvoke(tool_input)
                 return {"sub_task_raw_result": result}
-            else:
-                logging.warning(f"--- 未找到目標 '{current_goal.description}' 的特定工具，使用通用 LLM 處理 ---")
+            elif chosen_tool_name == "GeneralLLM":
+                logging.warning(f"--- LLM 選擇備用方案 GeneralLLM 來處理 '{current_goal.description}' ---")
                 general_llm = get_langchain_gemini_flash()
-                result = await general_llm.ainvoke(current_goal.description)
+                general_input = f"Task: {current_goal.description}\n\nContext:\n{json.dumps(working_memory, indent=2, ensure_ascii=False)}"
+                result = await general_llm.ainvoke(general_input)
                 return {"sub_task_raw_result": result.content}
+            else:
+                error_msg = f"FATAL: LLM 決策了一個不存在的工具 '{chosen_tool_name}'。"
+                logging.error(error_msg)
+                return {"sub_task_raw_result": error_msg}
+        
         except Exception as e:
-            logging.error(f"[{chosen_tool_name}] 工具執行失敗: {e}")
-            return {"sub_task_raw_result": f"Error executing tool '{chosen_tool_name}': {e}"}
+            error_message = f"FATAL: 在智慧執行核心節點發生嚴重錯誤: {e}"
+            logging.error(error_message, exc_info=True)
+            return {"sub_task_raw_result": error_message}
 
     async def reflection_node(self, state: AgentState) -> dict:
         logging.info("--- 高級反思器：評估子任務結果 ---")
