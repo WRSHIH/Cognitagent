@@ -132,7 +132,8 @@ class AgentNodes:
                         "simple_query_prompt": load_prompt("agent_simple_executor.txt"),
                         "planner_prompt": load_prompt("agent_planner.txt"),
                         "executive_prompt": load_prompt("agent_executive.txt"),
-                        "execute_prompt": load_prompt("agent_execute.txt")}
+                        "execute_prompt": load_prompt("agent_execute.txt"),
+                        "reflector_prompt": load_prompt("agent_reflector.txt")}
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
@@ -342,6 +343,7 @@ class AgentNodes:
         assert goal_id is not None, "Goal ID cannot be None in reflector"
         main_goal = state['main_goal']
         current_goal = next(g for g in plan.sub_goals if g.goal_id == goal_id)
+        current_goal_json = json.dumps(current_goal.model_dump(), ensure_ascii=False)
         working_memory_str = json.dumps(state.get('working_memory', {}), indent=2, ensure_ascii=False)
         raw_result = str(state.get('sub_task_raw_result', ''))
         failure_counts = state.get('sub_goal_failure_counts', {})
@@ -357,51 +359,11 @@ class AgentNodes:
                 "reasoning": "A fatal, non-recoverable error was returned by the tool."
             }
         else:
-            prompt = f"""
-            你是一位經驗豐富的專案經理，你的核心職責是評估子任務的執行結果，並決定專案的下一步走向。
-            你需要有智慧地判斷，而不是機械地追求完美。
-
-            **1. 專案的完整上下文:**
-            - **總體目標 (Main Goal):** {main_goal}
-            - **當前子目標 (Current Sub-goal):** {current_goal.description}
-            - **已知的背景資訊 (Working Memory):** ```json
-            {working_memory_str}
-            ```
-            - **子任務的原始執行結果 (Result to Evaluate):** ```
-            {raw_result[:2500]}
-            ```
-            
-            **2. 你的決策框架 (DECISION FRAMEWORK):**
-            - **A. 任務類型判斷 (Task Type Analysis):**
-            - 這是**初步的資訊蒐集任務**嗎 (例如，使用搜尋工具)？
-            - 還是**後續的處理/分析任務** (例如，整理、規劃、總結)？
-
-            - **B. 核心評估標準 (CRITICAL EVALUATION CRITERIA):**
-            - **對於資訊蒐集任務:**
-                - **相關性 (Relevance):** 結果是否與「當前子目標」高度相關？
-                - **充分性 (Sufficiency):** 結果是否提供了【足夠的基礎資訊】，讓【下一個】子任務可以繼續進行？(注意：這裡不需要「完全詳盡」，只需要「足夠下一步」即可)。
-            - **對於處理/分析任務:**
-                - **目標達成度 (Goal Completion):** 結果是否【直接且完整地】回答了「當前子目標」？
-                - **品質 (Quality):** 結果是否清晰、結構化且沒有明顯錯誤？
-
-            - **C. 內容安全審核 (Content Safety Check):**
-                - 結果中是否包含任何不當、攻擊性、或帶有強烈偏見的內容？
-
-            **3. 你的行動指令 (ACTIONABLE INSTRUCTIONS):**
-            - **第一步：生成摘要 (Generate Summary):**
-            - 無論你的最終決策是什麼，都必須先根據「子任務的原始執行結果」，生成一份【客觀、中立、安全】的摘要，移除所有主觀或不安全的內容。
-            - **第二步：做出裁決 (Make a Verdict):**
-            - 如果結果是**完全無關**的、**錯誤的**，或包含**不安全內容**，則你的決策是 `REPLAN`。
-            - 對於**資訊蒐集任務**，只要結果滿足【相關性】和【充分性】，即使不夠完美，你的決策也【應該是 `CONTINUE`】，以推動專案進程。
-            - 對於**處理/分析任務**，你需要更嚴格地評估其【目標達成度】和【品質】，若不滿足則決策為 `REPLAN`。
-            - 在絕大多數情況下，只要我們獲得了有用的新資訊，就應該選擇 `CONTINUE`。
-
-            請以 JSON 格式回傳你的最終分析報告。JSON 必須包含以下欄位：
-            - "summary": (字串) 你生成的【安全且中立】的摘要。
-            - "new_status": (字串) 根據你的評估，將子目標的新狀態設為 'completed' 或 'failed'。
-            - "next_action": (字串) 你的最終決策：'CONTINUE' 或 'REPLAN'。
-            - "reasoning": (字串) 你做出此決策的詳細理由，必須明確引用上述的決策框架。
-            """
+            prompt = self.prompts["reflector_prompt"].format(main_goal=main_goal,
+                                                             current_sub_goal_json=current_goal_json,
+                                                             working_memory_json=working_memory_str,
+                                                             raw_result=raw_result[:2500],)
+            logging.info(f"--- [DEBUG] 準備發送給 Reflector 的最終提示詞: ---\n{prompt}\n--- [DEBUG] ---")
             structured_reflection_llm = get_langchain_gemini_flash().with_structured_output(Verdict)
             verdict_model = await structured_reflection_llm.ainvoke(prompt)
             if verdict_model is None:
