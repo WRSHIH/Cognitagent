@@ -177,14 +177,13 @@ class AgentNodes:
                     else:
                         try:
                             logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
-                            observation = await tool_to_call.ainvoke(tool_call['args'])
-                            print(observation)
-                            final_result = observation
+                            raw_observation = await tool_to_call.ainvoke(tool_call['args'])
+                            logging.info(f"--- [DEBUG] 工具 '{tool_name}' 的原始回傳結果: {raw_observation} ---")
+                            final_result = f"根據網路搜尋結果，關於'{tool_call['args']['query']}'的摘要如下：\n{raw_observation[:500]}"
                             # final_result = {f'result{indx+1}': result.get('content') for indx, result in enumerate(observation.get("results"))}
-                            logging.info(f"--- [DEBUG] 工具 '{tool_name}' 的原始回傳結果: {observation} ---")
                         except Exception as e:
                             logging.error(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
-                    tool_messages.append(ToolMessage(content=json.dumps(final_result, ensure_ascii=False), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
+                    tool_messages.append(ToolMessage(content=final_result, tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
                 messages.extend(tool_messages)
                 try: 
                     logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
@@ -192,7 +191,17 @@ class AgentNodes:
 
                     if not final_response_message.content or not str(final_response_message.content).strip():
                         logging.warning("--- 快速路徑警告：LLM 綜合整理後回傳空內容，可能觸發了內容審核。---")
-                        return {"response": "抱歉，我在整理搜尋結果時遇到了問題，無法提供最終答案。這可能是由於網路內容觸發了安全機制。"}
+                        # 備用方案：使用更輕量級的模型和一個極簡的 Prompt
+                        fallback_llm = get_langchain_gemini_flash_lite()
+                        fallback_prompt = f"請根據以下資訊，用一句話總結'{state['main_goal']}'：\n\n{tool_messages[0].content}"
+                        fallback_response = await fallback_llm.ainvoke(fallback_prompt)
+                        if fallback_response.content and str(fallback_response.content).strip():
+                            logging.info("--- 快速路徑：備用方案成功生成回覆 ---")
+                            return {"response": fallback_response.content}
+                        else:
+                            logging.error("--- 快速路徑錯誤：備用方案也未能生成有效回覆。---")
+                            return {"response": "抱歉，我在整理搜尋結果時遇到了問題，無法提供最終答案。這可能是由於網路內容觸發了安全機制。"}
+                    
                     logging.info(f"--- 快速路徑：最終生成的回覆內容: '{final_response_message.content}' ---")
                     return {"response": final_response_message.content}
                 
