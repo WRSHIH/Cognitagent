@@ -47,29 +47,88 @@
 
 # V. 輸出格式指令 (Output Format Mandate)
 
-你的回應**必須包含兩部分**：一個 `thought` XML 標籤，緊接著一個 `json` 程式碼區塊。
+你的最終輸出**必須嚴格遵守**以下兩段式結構：首先是你的思考鏈 `thought` XML 標籤，緊接著是一個純淨的、可直接解析的 `json` 程式碼區塊。
 
-1.  **`<thought>` 區塊**：
-    - 在這裡，你必須用自然語言逐步闡述你的完整思考過程。
-    - 解構 `main_goal`，分析其潛在的複雜性與歧義。
-    - 解釋你計畫的整體策略。
-    - 逐一說明每個子目標的設定理由、工具選擇的考量、以及它們之間的依賴關係。
-    - **如果 `main_goal` 過於模糊，你應在此處說明你的計畫是如何先進行探索性搜尋來澄清目標的。**
+A.  **`<thought>` 區塊撰寫規則**：
+    在此區塊中，你必須結構化地闡述你的規劃思路，包含以下步驟：
+    1. **目標解構 (Goal Deconstruction)**: 分析 `main_goal` 的核心意圖和潛在的子任務。
+    2. **策略制定 (Strategy Formulation)**: 闡述你解決此問題的整體策略（例如：先搜尋、再比較、後總結、最後儲存）。
+    3. **步驟論證 (Step-by-step Justification)**: 逐一解釋為什麼要設定每個 `SubGoal`，你選擇該工具的理由，以及它們之間的依賴關係是如何決定的。
 
-2.  **`json` 區塊**：
-    - 緊隨在 `</thought>` 標籤之後。
-    - 包含一個**純淨的、嚴格遵守 `HierarchicalPlan` 結構**的 JSON 物件。
-    - **禁止**在此區塊中包含任何註解或額外文字。
-    - **`description` 欄位**：必須是**標準化的指令**，格式為：「**[動詞]** [目標名詞]，**使用** `[工具名稱]`」，例如：「**搜尋** 'Matrix-Game 2.0 論文的發表日期'，**使用** `tavily_search`」。
-    - **`status` 欄位**：對於所有新建立或待執行的子目標，其值**必須**是字串 `"todo"`。
+B.  **`json` 區塊撰寫規則**：
+    1. **純淨性 (Purity)**: JSON 區塊**必須**是唯一且純淨的輸出內容。
+    2. **絕對禁止 (Strictly Forbidden)**: 絕對禁止在 `json` 區塊前後或內部添加任何 Markdown 標記 (如 ```json 或 ```) 或任何形式的註解文字。
+    3. **合規性 (Validation)**: 輸出的內容必須是一個語法完全正確、可以被標準 JSON 解析器成功解析的物件。
 
+C. **欄位詳細說明 (Field Specifications)**:
+    對於 sub_goals 列表中的每一個 SubGoal 物件，必須遵守以下欄位規範：
+    1. `goal_id` (整數): 一個從 1 開始遞增的唯一識別碼。
+    2. `description` (字串): **必須**遵循「[**動詞**] [目標]，使用 [工具名稱]」的標準化格式。
+    3. `dependencies` (整數列表): 執行此目標前，必須先完成的 `goal_id` 列表。如果沒有依賴，則為空列表 `[]`。
+    4. `status` (字串): 對於所有新建立的子目標，此值必須固定為 `"todo"`。
+
+D. **完整範例 (Complete Example)**:
+    輸入:
+    main_goal: "分析比較 Matrix-Game 2.0 和 Reinforcement Learning with Rubric Anchors 這兩篇論文的設計理念、優劣勢，並生成一份總結報告，最後將新學到的知識儲存起來。"
+    previous_plan_summary: (此處為空，代表是首次規劃)
+    你的輸出範例:
+    ```json
+    {
+        "main_goal": "分析比較 `Matrix-Game 2.0` 和 `Reinforcement Learning with Rubric Anchors` 這兩篇論文的設計理念、優劣勢，並生成一份總結報告，最後將新學到的知識儲存起來。",
+        "sub_goals": [
+            {
+            "goal_id": 1,
+            "description": "搜尋 'Matrix-Game 2.0 論文的核心概念與技術細節'，使用 `tavily_search`",
+            "dependencies": [],
+            "status": "todo"
+            },
+            {
+            "goal_id": 2,
+            "description": "搜尋 'Reinforcement Learning with Rubric Anchors 論文的核心概念與訓練方法'，使用 `tavily_search`",
+            "dependencies": [],
+            "status": "todo"
+            },
+            {
+            "goal_id": 3,
+            "description": "根據 Goal #1 的搜尋結果，總結 Matrix-Game 2.0 的設計理念、優點和缺點，使用 `CognitiveProcessorTool`",
+            "dependencies": [
+                1
+            ],
+            "status": "todo"
+            },
+            {
+            "goal_id": 4,
+            "description": "根據 Goal #2 的搜尋結果，總結 Reinforcement Learning with Rubric Anchors 的設計理念、優點和缺點，使用 `CognitiveProcessorTool`",
+            "dependencies": [
+                2
+            ],
+            "status": "todo"
+            },
+            {
+            "goal_id": 5,
+            "description": "綜合 Goal #3 和 Goal #4 的分析結果，生成一份詳細的比較報告，使用 `CognitiveProcessorTool`",
+            "dependencies": [
+                3,
+                4
+            ],
+            "status": "todo"
+            },
+            {
+            "goal_id": 6,
+            "description": "將 Goal #5 生成的完整比較報告保存到核心知識庫，使用 `SaveNewKnowledgeTool`",
+            "dependencies": [
+                5
+            ],
+            "status": "todo"
+            }
+        ]
+    }
 ---
 **[輸入]**
 - **使用者最終目標 (`main_goal`)**: {main_goal}
 - **過往執行摘要 (`previous_plan_summary`)**: {previous_plan_summary}
 
 **[你的輸出 - 嚴格遵循 `thought` -> `json` 格式]**
-
 ```json
 {
   "main_goal": "...",

@@ -126,7 +126,8 @@ class AgentNodes:
         self.prompts = {"router_prompt": load_prompt("agent_router.txt"),
                         "simple_query_prompt": load_prompt("agent_simple_executor.txt"),
                         "planner_prompt": load_prompt("agent_planner.txt"),
-                        "executive_prompt": load_prompt("agent_executive.txt"),}
+                        "executive_prompt": load_prompt("agent_executive.txt"),
+                        "execute_prompt": load_prompt("agent_execute.txt")}
     
     async def router_node(self, state: AgentState) -> dict:
         logging.info("--- 路由節點：評估任務複雜度 ---")
