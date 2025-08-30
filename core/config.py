@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # 必要金鑰 (Secrets) 
     GEMINI_API_KEY: SecretStr
     QDRANT_API_KEY: SecretStr
-    TAVILY_API_KEY: SecretStr
+    SERPER_API_KEY: SecretStr
 
     # 資料庫與服務設定
     QDRANT_URL: HttpUrl

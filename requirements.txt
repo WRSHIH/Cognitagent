@@ -12,10 +12,10 @@ google-generativeai==0.8.5
 # --- Vector Database & Search ---
 qdrant-client==1.15.1
 llama-index-vector-stores-qdrant==0.7.1
-tavily-python==0.7.10
 langchain-tavily==0.2.11
-langchain-community==0.3.27  #
+langchain-community==0.3.27
 fastembed==0.7.1
+google-search-results==2.4.2
 
 # --- Data Parsing ---
 unstructured[pdf]==0.18.11

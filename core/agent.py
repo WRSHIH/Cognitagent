@@ -159,7 +159,7 @@ class AgentNodes:
         messages = [SystemMessage(content=self.prompts["simple_query_prompt"]),
                     HumanMessage(content=state['main_goal']),]
         try:
-            llm_with_tools = get_langchain_gemini_flash_lite().bind_tools(ALL_TOOLS)
+            llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
             logging.info("--- 快速路徑：LLM 正在決策... ---")
             response_message = await llm_with_tools.ainvoke(messages)
             if response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
@@ -178,13 +178,14 @@ class AgentNodes:
                         try:
                             logging.info(f"--- 快速路徑：正在執行工具 '{tool_name}'，參數: {tool_call['args']} ---")
                             observation = await tool_to_call.ainvoke(tool_call['args'])
-                            final_result = {f'result{indx+1}': result.get('content') for indx, result in enumerate(observation.get("results"))}
+                            print(observation)
+                            final_result = observation
+                            # final_result = {f'result{indx+1}': result.get('content') for indx, result in enumerate(observation.get("results"))}
                             logging.info(f"--- [DEBUG] 工具 '{tool_name}' 的原始回傳結果: {observation} ---")
                         except Exception as e:
                             logging.error(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
-                    tool_messages.append(ToolMessage(content=str(final_result), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
+                    tool_messages.append(ToolMessage(content=json.dumps(final_result, ensure_ascii=False), tool_call_id=tool_call.get("id"))) # pyright: ignore[reportPossiblyUnboundVariable]
                 messages.extend(tool_messages)
-                print(messages)
                 try: 
                     logging.info("--- 快速路徑：將工具結果傳回 LLM 進行綜合整理 ---")
                     final_response_message = await llm_with_tools.ainvoke(messages)
@@ -526,7 +527,7 @@ if __name__ == "__main__":
     Actions = AgentNodes(max_replans=3, max_subgoal_retries=2, tools = ALL_TOOLS)
     Query = {"main_goal": "鐵達尼號的導演是誰"}
     # Actions.router_node(Query)
-    Query_from_route = {"main_goal": "鐵達尼號的導演是誰", "route_decision": 'simple_query'}
+    Query_from_route = {"main_goal": "台北今天天氣", "route_decision": 'simple_query'}
     print(asyncio.run(Actions.simple_query_executor_node(Query_from_route)))
     # planner_Res = Actions.meta_planner_node(Query)
     # print(planner_Res)
