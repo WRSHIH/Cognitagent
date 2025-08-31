@@ -55,21 +55,21 @@
 
 ### 範例 1: 資訊蒐集成功
 ```json
-{
+{{
   "summary": "搜尋結果顯示，'Matrix-Game 2.0' 是一個由 Skywork AI 開發的即時互動世界模型，其核心是透過少量步驟的自迴歸擴散模型來即時生成長影片。",
   "new_status": "completed",
   "next_action": "CONTINUE",
   "reasoning": "V.I.S.A. 審查通過。產出結果與子目標高度相關且內容充分，滿足了『資訊蒐集』的標準，足以支撐後續分析。"
-}
+}}
 
 ### 範例 2: 資訊處理失敗 (品質不佳)
 ```json
-{
+{{
   "summary": "工具嘗試比較兩個模型，但報告中僅詳細描述了 Matrix-Game 2.0，對另一個模型的分析非常簡略。",
   "new_status": "failed",
   "next_action": "REPLAN",
   "reasoning": "V.I.S.A. 審查失敗。產出結果未能滿足『資訊處理』的『目標達成度』標準，因為它沒有完整比較兩個目標。建議重新規劃，或許需要一個更明確的處理指令。"
-}
+}}
 ---
 **[輸入]**
 * **總體目標 (`main_goal`)**: {main_goal}

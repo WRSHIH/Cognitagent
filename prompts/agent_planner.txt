@@ -69,42 +69,42 @@ C. **欄位詳細說明 (Field Specifications)**:
 
 D. **完整範例 (Complete Example)**:
     輸入:
-    main_goal: "分析比較 Matrix-Game 2.0 和 Reinforcement Learning with Rubric Anchors 這兩篇論文的設計理念、優劣勢，並生成一份總結報告，最後將新學到的知識儲存起來。"
-    previous_plan_summary: (此處為空，代表是首次規劃)
+    `main_goal`: "分析比較 Matrix-Game 2.0 和 Reinforcement Learning with Rubric Anchors 這兩篇論文的設計理念、優劣勢，並生成一份總結報告，最後將新學到的知識儲存起來。"
+    `previous_plan_summary`: (此處為空，代表是首次規劃)
     你的輸出範例:
     ```json
-    {
+    {{
         "main_goal": "分析比較 `Matrix-Game 2.0` 和 `Reinforcement Learning with Rubric Anchors` 這兩篇論文的設計理念、優劣勢，並生成一份總結報告，最後將新學到的知識儲存起來。",
         "sub_goals": [
-            {
+            {{
             "goal_id": 1,
             "description": "搜尋 'Matrix-Game 2.0 論文的核心概念與技術細節'，使用 `tavily_search`",
             "dependencies": [],
             "status": "todo"
-            },
-            {
+            }},
+            {{
             "goal_id": 2,
             "description": "搜尋 'Reinforcement Learning with Rubric Anchors 論文的核心概念與訓練方法'，使用 `tavily_search`",
             "dependencies": [],
             "status": "todo"
-            },
-            {
+            }},
+            {{
             "goal_id": 3,
             "description": "根據 Goal #1 的搜尋結果，總結 Matrix-Game 2.0 的設計理念、優點和缺點，使用 `CognitiveProcessorTool`",
             "dependencies": [
                 1
             ],
             "status": "todo"
-            },
-            {
+            }},
+            {{
             "goal_id": 4,
             "description": "根據 Goal #2 的搜尋結果，總結 Reinforcement Learning with Rubric Anchors 的設計理念、優點和缺點，使用 `CognitiveProcessorTool`",
             "dependencies": [
                 2
             ],
             "status": "todo"
-            },
-            {
+            }},
+            {{
             "goal_id": 5,
             "description": "綜合 Goal #3 和 Goal #4 的分析結果，生成一份詳細的比較報告，使用 `CognitiveProcessorTool`",
             "dependencies": [
@@ -112,27 +112,20 @@ D. **完整範例 (Complete Example)**:
                 4
             ],
             "status": "todo"
-            },
-            {
+            }},
+            {{
             "goal_id": 6,
             "description": "將 Goal #5 生成的完整比較報告保存到核心知識庫，使用 `SaveNewKnowledgeTool`",
             "dependencies": [
                 5
             ],
             "status": "todo"
-            }
+            }}
         ]
-    }
+    }}
 ---
 **[輸入]**
 - **使用者最終目標 (`main_goal`)**: {main_goal}
 - **過往執行摘要 (`previous_plan_summary`)**: {previous_plan_summary}
 
 **[你的輸出 - 嚴格遵循 `thought` -> `json` 格式]**
-```json
-{
-  "main_goal": "...",
-  "sub_goals": [
-    ...
-  ]
-}

@@ -227,7 +227,7 @@ class AgentNodes:
         if state.get('plan') and state.get('working_memory'):
             previous_plan_summary = ("先前的計畫執行遭遇困難或結果不佳。以下是相關的歷史執行摘要，請務必基於此進行根源分析並提出改良計畫：\n"
                                      f"```json\n{json.dumps(state['working_memory'], indent=2, ensure_ascii=False)}\n```")
-        prompt = self.prompts["planner_system"].format(main_goal=state['main_goal'],
+        prompt = self.prompts["planner_prompt"].format(main_goal=state['main_goal'],
                                                        previous_plan_summary=previous_plan_summary,)
         logging.info(f"--- [DEBUG] 準備發送給 Planner 的最終提示詞: ---\n{prompt}\n--- [DEBUG] ---")
         
@@ -323,7 +323,7 @@ class AgentNodes:
                                 """
         human_message = HumanMessage(content=human_prompt_content)
         prompt_template = ChatPromptTemplate.from_messages([system_message, human_message])
-        executor_llm = get_langchain_gemini_flash().with_structured_output(ToolCallDecision)
+        executor_llm = get_langchain_gemini_pro().with_structured_output(ToolCallDecision)
         chain = prompt_template | executor_llm
         
         try:
@@ -341,9 +341,9 @@ class AgentNodes:
             if chosen_tool_name in self.tool:
                 tool_to_call = self.tool[chosen_tool_name]
                 logging.info(f"--- 正在執行工具 '{chosen_tool_name}'... ---")
-                result = await tool_to_call.ainvoke(tool_input)
+                result = await tool_to_call.ainvoke(tool_input) #這是toolmessage? 
                 return {"sub_task_raw_result": result}
-            elif chosen_tool_name == "GeneralLLM":
+            elif chosen_tool_name == "GeneralLLM": #邏輯應該是沒有選tool 才由LLM 執行
                 logging.warning(f"--- LLM 選擇備用方案 GeneralLLM 來處理 '{current_goal.description}' ---")
                 general_llm = get_langchain_gemini_flash()
                 general_input = f"Task: {current_goal.description}\n\nContext:\n{json.dumps(working_memory, indent=2, ensure_ascii=False)}"

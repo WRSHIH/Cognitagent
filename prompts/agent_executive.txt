@@ -52,27 +52,27 @@
 
 ### 範例 1: 正常繼續執行
 ```json
-{
+{{
   "decision": "CONTINUE",
   "next_goal_id": 2,
   "reasoning": "計畫未完成。子目標 #1 已完成且產出品質良好，滿足子目標 #2 的前置條件，故繼續執行。"
-}
+}}
 
 ### 範例 2: 因前置任務品質不佳而重新規劃
 ```json
-{
+{{
   "decision": "REPLAN",
   "next_goal_id": null,
   "reasoning": "子目標 #2 的前置任務 #1 雖然已完成，但其結果摘要顯示'未找到相關資訊'，品質不足以支撐後續分析，故需重新規劃。"
-}
+}}
 
 ### 範例 3: 所有任務完成，準備總結
 ```json
-{
+{{
   "decision": "SYNTHESIZE",
   "next_goal_id": null,
   "reasoning": "所有子目標狀態均為 'completed'，計畫已成功執行完畢，準備進行最終總結。"
-}
+}}
 
 ---
 **[輸入]**

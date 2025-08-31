@@ -84,5 +84,3 @@
 **[輸入]**
 * **使用者最終目標 (`main_goal`)**: {main_goal}
 * **完整的執行摘要 (`working_memory`)**: {working_memory_json}
-
-**[你的輸出]**

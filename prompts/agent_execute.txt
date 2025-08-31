@@ -46,6 +46,7 @@
 ### **範例 1: 執行一個需要上下文的認知處理任務**
 
 **[輸入]**
+* **main_goal**: "請分析比較 'Matrix-Game 2.0' 和 'Reinforcement Learning with Rubric Anchors' 這兩篇論文"
 * **current_sub_goal**: `{"goal_id": 3, "description": "比較 Matrix-Game 2.0 和 Reinforcement Learning with Rubric Anchors 這兩篇論文的貢獻，並總結成表格"}`
 * **working_memory**: `{"goal_1_summary": "Matrix-Game 2.0 是一篇關於...", "goal_2_summary": "Reinforcement Learning with Rubric Anchors 是一篇關於..."}`
 * **available_tools**: `[{"name": "CognitiveProcessorTool", "description": "...", "parameters": {"type": "object", "properties": {"task": {"type": "string"}, "context": {"type": "object"}}, "required": ["task", "context"]}}]`
@@ -67,6 +68,7 @@
 ### **範例 2: 執行一個簡單的網路搜尋**
 
 **[輸入]**
+* **main_goal**: "鐵達尼號導演"
 * **current_sub_goal**: {"goal_id": 1, "description": "搜尋'鐵達尼號'的導演是誰"}
 * **working_memory**: {}
 * **available_tools**: [{"name": "tavily_search", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}]
