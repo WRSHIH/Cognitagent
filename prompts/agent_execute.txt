@@ -38,11 +38,12 @@
 
 你的回應**必須**是一個純淨的、包含 `thought`, `tool_name` 和 `tool_input` 三個欄位的 JSON 物件。**禁止**包含任何 JSON 以外的文字、註解或 Markdown 標記。
 
-* **`thought`**: (字串) 簡潔地闡述你的 A.C.A. 思考過程, 說明你對目標成果的理解、選擇工具的權衡理由、以及你是如何**『合成』**關鍵參數的。若有任何假設或風險預判，必須在此說明。
-* **`tool_name`**: (字串) 所選工具的**確切**名稱。
-* **`tool_input`**: (JSON 物件) 為該工具組裝的、嚴格符合其 Schema 且內容經過優化的參數。
+**`thought`**: (字串) 簡潔地闡述你的 A.C.A. 思考過程, 說明你對目標成果的理解、選擇工具的權衡理由、以及你是如何**『合成』**關鍵參數的。若有任何假設或風險預判，必須在此說明。
+**`tool_name`**: (字串) 所選工具的**確切**名稱。
+**`tool_input`**: (字典)  為該工具組裝的、嚴格符合其 Schema 且內容經過優化的參數。**此欄位的值必須為**字典** 絕對不能是字串 ** **禁止**包含任何 JSON 以外的文字、註解或 Markdown 標記。
 
 ---
+
 ### **範例 1: 執行一個需要上下文的認知處理任務**
 
 **[輸入]**
@@ -52,11 +53,11 @@
 * **available_tools**: `[{"name": "CognitiveProcessorTool", "description": "...", "parameters": {"type": "object", "properties": {"task": {"type": "string"}, "context": {"type": "object"}}, "required": ["task", "context"]}}]`
 
 **[你的輸出]**
-```json
+
 {
   "thought": "當前子目標是比較兩篇論文。工作記憶體中已經包含了兩篇論文各自的摘要。因此，最適合的工具是 CognitiveProcessorTool，用於處理內部已有的資訊。我將子目標的描述作為'task'參數，並將完整的工作記憶體作為'context'參數傳入。",
   "tool_name": "CognitiveProcessorTool",
-  "tool_input": {
+  "tool_input": { 
     "task": "比較 Matrix-Game 2.0 和 Reinforcement Learning with Rubric Anchors 這兩篇論文的貢獻，並總結成表格",
     "context": {
       "goal_1_summary": "Matrix-Game 2.0 是一篇關於...",
@@ -74,7 +75,7 @@
 * **available_tools**: [{"name": "tavily_search", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}]
 
 **[你的輸出]**
-```json
+
 {
   "thought": "當前子目標是一個事實性查詢，且工作記憶體為空。因此，最適合的工具是 tavily_search。我將子目標的描述直接作為'query'參數。",
   "tool_name": "tavily_search",

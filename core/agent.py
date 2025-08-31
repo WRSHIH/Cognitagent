@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # 導入LLM 服務和工具列表
 from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, get_langchain_gemini_flash_lite
@@ -75,6 +75,13 @@ def find_next_executable_goal(plan: HierarchicalPlan) -> Union[SubGoal, None]:
         if goal.status.lower() in ["pending", "todo", "待執行"] and all(dep in completed_ids for dep in goal.dependencies):
             return goal
     return None
+
+def jsonlike_str_to_dict(content:str) -> Dict[str, Any]:
+    S = content.strip()
+    if S.startswith("```json") and S.endswith("```"):
+            return json.loads(S[7:-3])
+    else:
+        return dict()
 
 # def is_plan_stuck(plan: HierarchicalPlan) -> bool:
 #     has_pending_goals = any(g.status.lower() in ["pending", "todo", "待執行"] for g in plan.sub_goals)
@@ -234,12 +241,12 @@ class AgentNodes:
         try:
             plan = await structured_planner_llm.ainvoke(prompt)
             plan_dict = plan.model_dump() if hasattr(plan, 'model_dump') else plan # pyright: ignore[reportAttributeAccessIssue]
-            logging.info(f"--- [DEBUG] 元規劃器生成的計畫詳情: ---\n{json.dumps(plan_dict, indent=2, ensure_ascii=False)}\n--- [DEBUG] ---")
+            # logging.info(f"--- [DEBUG] 元規劃器生成的計畫詳情: ---\n{json.dumps(plan_dict, indent=2, ensure_ascii=False)}\n--- [DEBUG] ---")
             if not plan or not plan.sub_goals: # pyright: ignore[reportAttributeAccessIssue]
                 logging.error("元規劃器未能生成有效的計畫內容 (回傳為空或沒有子目標)。")
                 return {"is_human_intervention_needed": True,
                         "response": "Fatal error in planning: The meta planner failed to generate a valid plan structure.",}
-            logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---") # pyright: ignore[reportAttributeAccessIssue]
+            # logging.info(f"--- 元規劃器：成功生成計畫，包含 {len(plan.sub_goals)} 個子目標 ---") # pyright: ignore[reportAttributeAccessIssue]
             return {"plan": plan, "is_human_intervention_needed": False}
         except Exception as e:
             logging.error(f"元規劃器發生嚴重錯誤: {e}")
@@ -296,13 +303,13 @@ class AgentNodes:
         plan = state['plan']
         assert plan is not None, "Plan cannot be None in executor"
         assert goal_id is not None, "Goal ID cannot be None in executor"
+        main_goal = state.get('main_goal', '')
+        working_memory = state.get('working_memory', {})
         current_goal = next((g for g in plan.sub_goals if g.goal_id == goal_id), None)
         if not current_goal:
             return {"sub_task_raw_result": f"FATAL: Could not find sub-goal with ID {goal_id} in the plan."}
         logging.info(f"--- 智慧執行核心：開始處理子目標 #{goal_id} '{current_goal.description}' ---")
         
-        main_goal = state.get('main_goal', '')
-        working_memory = state.get('working_memory', {})
         formatted_tools = []
         for tool in self.tool.values():
             tool_schema = {"name": tool.name,
@@ -310,28 +317,33 @@ class AgentNodes:
                            "parameters": tool.get_input_schema().model_json_schema(),}
             formatted_tools.append(json.dumps(tool_schema, indent=2, ensure_ascii=False))
         available_tools_str = "\n---\n".join(formatted_tools)
-        system_message = SystemMessage(content=self.prompts["execute_prompt"])
         human_prompt_content = f"""
-                                    **[輸入]**
                                     - **總體目標 (`main_goal`)**: {main_goal}
                                     - **當前子目標 (`current_sub_goal`)**: {json.dumps(current_goal.model_dump(), ensure_ascii=False)}
                                     - **目前工作記憶體 (`working_memory`)**: {json.dumps(working_memory, indent=2, ensure_ascii=False)}
                                     - **所有可用工具 (`available_tools`)**: {available_tools_str}
-                                    ---
-                                    **[你的輸出]**
-                                    請嚴格按照指令，生成包含 `thought`, `tool_name` 和 `tool_input` 的 JSON 物件。
                                 """
-        human_message = HumanMessage(content=human_prompt_content)
-        prompt_template = ChatPromptTemplate.from_messages([system_message, human_message])
-        executor_llm = get_langchain_gemini_pro().with_structured_output(ToolCallDecision)
-        chain = prompt_template | executor_llm
+        messages = [SystemMessage(content=self.prompts["execute_prompt"]),
+                    HumanMessage(content=human_prompt_content),]
+        llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
+        response_message = await llm_with_tools.ainvoke(messages)
+        response_content = jsonlike_str_to_dict(response_message.content) # pyright: ignore[reportArgumentType]
         
+        if response_content:
+            try:
+                response_model = ToolCallDecision(**response_content)
+                logging.info("✅ ToolCallDecision 模型驗證成功！")
+            except ValidationError as e:
+                logging.error(f"❌ 驗證失敗！不符合 ToolCallDecision 模型的規範。\n--- 詳細錯誤報告 ---\n {e}")
+                return {}
+        else:
+            logging.info("❌ 轉換失敗：從原始字串中無法解析出有效的 JSON 字典。")
+            return {}
+
         try:
-            logging.info("--- 智慧執行核心：請求 LLM 進行 A.C.A 決策... ---")
-            response_model = await chain.ainvoke({})
-            thought = response_model.thought # pyright: ignore[reportAttributeAccessIssue]
-            chosen_tool_name = response_model.tool_name # pyright: ignore[reportAttributeAccessIssue]
-            tool_input = response_model.tool_input # pyright: ignore[reportAttributeAccessIssue]
+            thought = response_model.thought
+            chosen_tool_name = response_model.tool_name
+            tool_input = response_model.tool_input
 
             logging.info(f"--- LLM 決策完成 ---")
             logging.info(f"  - 思考過程: {thought}")
@@ -341,13 +353,12 @@ class AgentNodes:
             if chosen_tool_name in self.tool:
                 tool_to_call = self.tool[chosen_tool_name]
                 logging.info(f"--- 正在執行工具 '{chosen_tool_name}'... ---")
-                result = await tool_to_call.ainvoke(tool_input) #這是toolmessage? 
+                result = await tool_to_call.ainvoke(tool_input)
                 return {"sub_task_raw_result": result}
-            elif chosen_tool_name == "GeneralLLM": #邏輯應該是沒有選tool 才由LLM 執行
+            elif chosen_tool_name == "GeneralLLM":
                 logging.warning(f"--- LLM 選擇備用方案 GeneralLLM 來處理 '{current_goal.description}' ---")
-                general_llm = get_langchain_gemini_flash()
                 general_input = f"Task: {current_goal.description}\n\nContext:\n{json.dumps(working_memory, indent=2, ensure_ascii=False)}"
-                result = await general_llm.ainvoke(general_input)
+                result = await get_langchain_gemini_pro().ainvoke(general_input)
                 return {"sub_task_raw_result": result.content}
             else:
                 error_msg = f"FATAL: LLM 決策了一個不存在的工具 '{chosen_tool_name}'。"
@@ -538,7 +549,7 @@ if __name__ == "__main__":
     Query = {"main_goal": "鐵達尼號的導演是誰"}
     # Actions.router_node(Query)
     Query_from_route = {"main_goal": "台北今天天氣", "route_decision": 'simple_query'}
-    print(asyncio.run(Actions.simple_query_executor_node(Query_from_route)))
+    # print(asyncio.run(Actions.simple_query_executor_node(Query_from_route))) # pyright: ignore[reportArgumentType]
     # planner_Res = Actions.meta_planner_node(Query)
     # print(planner_Res)
     # After_planner_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
@@ -547,13 +558,13 @@ if __name__ == "__main__":
     #                                                            'is_human_intervention_needed': False,
     #                                                            "main_goal": "鐵達尼號的導演是誰",}
     # print(Actions.executive_node(After_planner_state))
-    # After_executive_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
-    #                                                 sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
-    #                                                            SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
-    #                                                            'is_human_intervention_needed': False,
-    #                                                            "main_goal": "鐵達尼號的導演是誰",
-    #                                                            'current_sub_goal_id': 1,}
-    # print(Actions.execute_subgraph_node(After_executive_state))
+    After_executive_state = {'plan': HierarchicalPlan(main_goal="請分析比較 'Matrix-Game 2.0' 和 'Reinforcement Learning with Rubric Anchors' 這兩篇論文。", 
+                                                    sub_goals=[SubGoal(goal_id=1, description="使用 tavily_search 搜尋 Matrix-Game 2.0", dependencies=[], status='pending', raw_result=None, result_summary=''), 
+                                                               SubGoal(goal_id=2, description='總結搜尋結果', dependencies=[1], status='pending', raw_result=None, result_summary='')]), 
+                            'is_human_intervention_needed': False,
+                            "main_goal": "請分析比較 'Matrix-Game 2.0' 和 'Reinforcement Learning with Rubric Anchors' 這兩篇論文。",
+                            'current_sub_goal_id': 1,}
+    print(asyncio.run(Actions.execute_subgraph_node(After_executive_state)))
     # After_execute_state = {'plan': HierarchicalPlan(main_goal='找出鐵達尼號的導演是誰', 
     #                                                 sub_goals=[SubGoal(goal_id=1, description='使用 tavily_search 搜尋“鐵達尼號的導演”', dependencies=[], status='PENDING', raw_result=None, result_summary=''), 
     #                                                            SubGoal(goal_id=2, description='總結搜尋結果並回答導演是誰', dependencies=[1], status='PENDING', raw_result=None, result_summary='')]), 
