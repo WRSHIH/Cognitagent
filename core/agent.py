@@ -76,41 +76,41 @@ def find_next_executable_goal(plan: HierarchicalPlan) -> Union[SubGoal, None]:
             return goal
     return None
 
-def is_plan_stuck(plan: HierarchicalPlan) -> bool:
-    has_pending_goals = any(g.status.lower() in ["pending", "todo", "待執行"] for g in plan.sub_goals)
-    next_executable = find_next_executable_goal(plan)
-    return has_pending_goals and next_executable is None
+# def is_plan_stuck(plan: HierarchicalPlan) -> bool:
+#     has_pending_goals = any(g.status.lower() in ["pending", "todo", "待執行"] for g in plan.sub_goals)
+#     next_executable = find_next_executable_goal(plan)
+#     return has_pending_goals and next_executable is None
 
-async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
-    logging.info(f"--- LLM Tool Router: 正在為目標 '{currentgoal.description[:50]}...' 選擇工具 ---")
-    formatted_tools = "\n".join([f"---\n -工具名稱: {tool.name}\n -功能描述: {tool.description}" for tool in ALL_TOOLS])
-    prompt_template = ChatPromptTemplate.from_messages([
-                                                                    ("system", 
-                                                                    """你是一個智能的工具路由專家。你的任務是根據使用者提供的子目標，從下面的可用工具列表中，選擇最適合完成該目標的單一工具。
-                                                                    請仔細閱讀每個工具的功能描述來做出最佳判斷。
+# async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
+#     logging.info(f"--- LLM Tool Router: 正在為目標 '{currentgoal.description[:50]}...' 選擇工具 ---")
+#     formatted_tools = "\n".join([f"---\n -工具名稱: {tool.name}\n -功能描述: {tool.description}" for tool in ALL_TOOLS])
+#     prompt_template = ChatPromptTemplate.from_messages([
+#                                                                     ("system", 
+#                                                                     """你是一個智能的工具路由專家。你的任務是根據使用者提供的子目標，從下面的可用工具列表中，選擇最適合完成該目標的單一工具。
+#                                                                     請仔細閱讀每個工具的功能描述來做出最佳判斷。
 
-                                                                    可用工具列表:
-                                                                    {tools_list}
+#                                                                     可用工具列表:
+#                                                                     {tools_list}
 
-                                                                    你必須以 JSON 格式回應，包含 `tool_name` 和 `reasoning` 兩個欄位。
-                                                                    `tool_name` 必須與上面「工具名稱」中的一個完全匹配。"""),
-                                                                    ("human", "子目標: {sub_goal}")
-                                                                ])
-    structured_llm = get_langchain_gemini_flash_lite().with_structured_output(ToolSelection)
-    chain = prompt_template | structured_llm
+#                                                                     你必須以 JSON 格式回應，包含 `tool_name` 和 `reasoning` 兩個欄位。
+#                                                                     `tool_name` 必須與上面「工具名稱」中的一個完全匹配。"""),
+#                                                                     ("human", "子目標: {sub_goal}")
+#                                                                 ])
+#     structured_llm = get_langchain_gemini_flash_lite().with_structured_output(ToolSelection)
+#     chain = prompt_template | structured_llm
 
-    try:
-        response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
-        if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}: # pyright: ignore[reportAttributeAccessIssue] # pyright: ignore[reportAttributeAccessIssue]
-            logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
-            return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
-        else:
-            tool_name_str = getattr(response, 'tool_name', 'None')
-            logging.warning(f"--- LLM 路由警告: 模型回傳了無效或不存在的工具 '{tool_name_str}'。將啟用備用方案。 ---")
-            return ""
-    except Exception as e:
-        logging.error(f"--- LLM 路由嚴重錯誤: {e}. 將啟用備用方案。 ---")
-        return ""
+#     try:
+#         response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
+#         if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}: # pyright: ignore[reportAttributeAccessIssue] # pyright: ignore[reportAttributeAccessIssue]
+#             logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
+#             return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
+#         else:
+#             tool_name_str = getattr(response, 'tool_name', 'None')
+#             logging.warning(f"--- LLM 路由警告: 模型回傳了無效或不存在的工具 '{tool_name_str}'。將啟用備用方案。 ---")
+#             return ""
+#     except Exception as e:
+#         logging.error(f"--- LLM 路由嚴重錯誤: {e}. 將啟用備用方案。 ---")
+#         return ""
 
 def update_plan_status(plan: HierarchicalPlan, goal_id: int, verdict: dict, raw_result: Any) -> HierarchicalPlan:
     plan_copy = plan.model_copy(deep=True)
@@ -162,6 +162,7 @@ class AgentNodes:
             llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
             logging.info("--- 快速路徑：LLM 正在決策... ---")
             response_message = await llm_with_tools.ainvoke(messages)
+            messages.append(response_message)
             if response_message.tool_calls: # pyright: ignore[reportAttributeAccessIssue]
                 logging.info(f"--- 快速路徑：偵測到工具呼叫: {[tc['name'] for tc in response_message.tool_calls]} ---") # pyright: ignore[reportAttributeAccessIssue]
                 tool_messages = []
