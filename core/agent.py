@@ -6,9 +6,8 @@ from functools import lru_cache
 
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import InMemorySaver
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage, HumanMessage
+from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, ValidationError
 
 # 導入LLM 服務和工具列表
@@ -60,7 +59,7 @@ class AgentState(TypedDict):
     plan: Union[HierarchicalPlan, None]
     working_memory: Annotated[dict, lambda left, right: {**left, **right}]
     current_sub_goal_id: Union[int, None]
-    sub_goal_failure_counts: Annotated[dict, lambda left, right: {**left, **right}]
+    sub_goal_retry_info: Annotated[dict, lambda left, right: {**left, **right}]
     sub_task_raw_result: Union[dict, str, None]
     replan_count: int
     is_human_intervention_needed: bool
@@ -82,42 +81,6 @@ def jsonlike_str_to_dict(content:str) -> Dict[str, Any]:
             return json.loads(S[7:-3])
     else:
         return dict()
-
-# def is_plan_stuck(plan: HierarchicalPlan) -> bool:
-#     has_pending_goals = any(g.status.lower() in ["pending", "todo", "待執行"] for g in plan.sub_goals)
-#     next_executable = find_next_executable_goal(plan)
-#     return has_pending_goals and next_executable is None
-
-# async def get_specialist_for_goal_llm(currentgoal: SubGoal) -> str:
-#     logging.info(f"--- LLM Tool Router: 正在為目標 '{currentgoal.description[:50]}...' 選擇工具 ---")
-#     formatted_tools = "\n".join([f"---\n -工具名稱: {tool.name}\n -功能描述: {tool.description}" for tool in ALL_TOOLS])
-#     prompt_template = ChatPromptTemplate.from_messages([
-#                                                                     ("system", 
-#                                                                     """你是一個智能的工具路由專家。你的任務是根據使用者提供的子目標，從下面的可用工具列表中，選擇最適合完成該目標的單一工具。
-#                                                                     請仔細閱讀每個工具的功能描述來做出最佳判斷。
-
-#                                                                     可用工具列表:
-#                                                                     {tools_list}
-
-#                                                                     你必須以 JSON 格式回應，包含 `tool_name` 和 `reasoning` 兩個欄位。
-#                                                                     `tool_name` 必須與上面「工具名稱」中的一個完全匹配。"""),
-#                                                                     ("human", "子目標: {sub_goal}")
-#                                                                 ])
-#     structured_llm = get_langchain_gemini_flash_lite().with_structured_output(ToolSelection)
-#     chain = prompt_template | structured_llm
-
-#     try:
-#         response = await chain.ainvoke({"tools_list": formatted_tools, "sub_goal": currentgoal.description})
-#         if response and hasattr(response, 'tool_name') and response.tool_name in {tool.name for tool in ALL_TOOLS}: # pyright: ignore[reportAttributeAccessIssue] # pyright: ignore[reportAttributeAccessIssue]
-#             logging.info(f"--- LLM 路由決策: 工具 '{response.tool_name}'. 理由: {response.reasoning} ---") # pyright: ignore[reportAttributeAccessIssue]
-#             return response.tool_name # pyright: ignore[reportAttributeAccessIssue]
-#         else:
-#             tool_name_str = getattr(response, 'tool_name', 'None')
-#             logging.warning(f"--- LLM 路由警告: 模型回傳了無效或不存在的工具 '{tool_name_str}'。將啟用備用方案。 ---")
-#             return ""
-#     except Exception as e:
-#         logging.error(f"--- LLM 路由嚴重錯誤: {e}. 將啟用備用方案。 ---")
-#         return ""
 
 def update_plan_status(plan: HierarchicalPlan, goal_id: int, verdict: dict, raw_result: Any) -> HierarchicalPlan:
     plan_copy = plan.model_copy(deep=True)
@@ -332,7 +295,7 @@ class AgentNodes:
         if response_content:
             try:
                 response_model = ToolCallDecision(**response_content)
-                logging.info("✅ ToolCallDecision 模型驗證成功！")
+                logging.info("--- ✅ ToolCallDecision 模型驗證成功！ ---")
             except ValidationError as e:
                 logging.error(f"❌ 驗證失敗！不符合 ToolCallDecision 模型的規範。\n--- 詳細錯誤報告 ---\n {e}")
                 return {}
@@ -381,8 +344,8 @@ class AgentNodes:
         current_goal_json = json.dumps(current_goal.model_dump(), ensure_ascii=False)
         working_memory_str = json.dumps(state.get('working_memory', {}), indent=2, ensure_ascii=False)
         raw_result = str(state.get('sub_task_raw_result', ''))
-        failure_counts = state.get('sub_goal_failure_counts', {})
-        current_failures = failure_counts.get(goal_id, 0)
+        retry_info = state.get('sub_goal_retry_info', {})
+        current_retry_info  = retry_info.get(goal_id, {'attempts': 0, 'delay': 2})
         is_fatal_error = raw_result.strip().startswith("FATAL:")
 
         if is_fatal_error:
@@ -413,20 +376,19 @@ class AgentNodes:
                 verdict = verdict_model.model_dump() # pyright: ignore[reportAttributeAccessIssue]
         
         # 處理失敗計數與決策覆寫
-        if verdict.get('new_status') == 'failed' or verdict.get('next_action') == 'ABORT':
-            current_failures += 1
-            failure_counts[goal_id] = current_failures
-            logging.warning(f"--- 反思器：子任務 {goal_id} 失敗。這是第 {current_failures} 次失敗。---")
+        if verdict.get('new_status') == 'failed' or verdict.get('next_action') == 'RETRY':
+            current_retry_info['attempts'] += 1
+            logging.warning(f"--- 反思器：子任務 {goal_id} 失敗。這是第 {current_retry_info['attempts']} 次嘗試。---")
 
-            if current_failures >= self.MAX_SUBGOAL_RETRIES:
+            if current_retry_info['attempts'] >= self.MAX_SUBGOAL_RETRIES:
                 logging.error(f"--- 反思器：子任務 {goal_id} 已達最大重試次數 ({self.MAX_SUBGOAL_RETRIES})。強制中止！---")
-                final_response_message = f"代理程式中止：子任務 '{current_goal.description}' 在嘗試 {current_failures} 次後仍然失敗。"
+                final_response_message = f"代理程式中止：子任務 '{current_goal.description}' 在嘗試 {current_retry_info['attempts']} 次後仍然失敗。"
                 updated_plan = update_plan_status(plan, goal_id, verdict, raw_result)
                 return {
                     "plan": updated_plan,
                     "is_human_intervention_needed": True,
                     "response": final_response_message,
-                    "sub_goal_failure_counts": failure_counts
+                    "sub_goal_retry_info": {**retry_info, goal_id: current_retry_info}
                 }
 
         next_action = verdict.get('next_action', 'REPLAN').upper()
@@ -448,8 +410,21 @@ class AgentNodes:
             "next_action": next_action,
             "replan_count": replan_count,
             "sub_task_raw_result": None,
-            "sub_goal_failure_counts": failure_counts
+            "sub_goal_retry_info": {**retry_info, goal_id: current_retry_info}
         }
+
+    async def retry_node(self, state: AgentState) -> dict:
+        goal_id = state['current_sub_goal_id']
+        retry_info = state.get('sub_goal_retry_info', {}).get(goal_id, {})
+        delay = retry_info.get('delay', 2)
+
+        logging.info(f"--- 重試策略核心：偵測到暫時性失敗，將在 {delay} 秒後重試子目標 #{goal_id} ---")
+        await asyncio.sleep(delay)
+
+        retry_info['delay'] = delay * 2 
+
+        # 這裡只負責等待，不改變其他狀態，等待後流程會自動回到 executor
+        return {"sub_goal_retry_info": {**state.get('sub_goal_retry_info', {}), goal_id: retry_info}}
 
     async def synthesizer_node(self, state: AgentState) -> dict:
         logging.info("--- 綜合節點：生成最終報告 ---")
@@ -490,6 +465,7 @@ def create_master_graph():
     workflow.add_node("executive", nodes.executive_node)
     workflow.add_node("executor", nodes.execute_subgraph_node)
     workflow.add_node("reflector", nodes.reflection_node)
+    workflow.add_node("retry_handler", nodes.retry_node)
     workflow.add_node("synthesizer", nodes.synthesizer_node)
     workflow.add_node("human_intervention", nodes.human_intervention_node)
 
@@ -521,7 +497,6 @@ def create_master_graph():
             if plan and not find_next_executable_goal(plan):
                  return "synthesizer"
             else:
-                # 如果 LLM 說完成了，但程式邏輯發現還有未完成的，就強制重新規劃
                 logging.warning("--- 路由：執行官與程式邏輯判斷不一致，強制重新規劃！---")
                 return "meta_planner"
         return "executor"
@@ -532,12 +507,14 @@ def create_master_graph():
     def route_from_reflector(state: AgentState):
         if state.get("is_human_intervention_needed"):
             return "human_intervention"
-        next_action = state.get("next_action")
-        if next_action and next_action.upper() == "REPLAN": # pyright: ignore[reportOptionalMemberAccess]
+        next_action = state.get("next_action", "").upper()
+        if next_action == "REPLAN":
             return "meta_planner"
-        return "executive" # CONTINUE
+        if next_action == "RETRY":
+            return "retry_handler"
+        return "executive"
     workflow.add_conditional_edges("reflector", route_from_reflector)
-
+    workflow.add_edge("retry_handler", "executor") 
     workflow.add_edge("synthesizer", END)
     workflow.add_edge("human_intervention", END)
     memory = InMemorySaver()
