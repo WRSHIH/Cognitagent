@@ -288,22 +288,23 @@ class AgentNodes:
                                 """
         messages = [SystemMessage(content=self.prompts["execute_prompt"]),
                     HumanMessage(content=human_prompt_content),]
-        llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
-        response_message = await llm_with_tools.ainvoke(messages)
-        response_content = jsonlike_str_to_dict(response_message.content) # pyright: ignore[reportArgumentType]
         
-        if response_content:
-            try:
-                response_model = ToolCallDecision(**response_content)
-                logging.info("--- ✅ ToolCallDecision 模型驗證成功！ ---")
-            except ValidationError as e:
-                logging.error(f"❌ 驗證失敗！不符合 ToolCallDecision 模型的規範。\n--- 詳細錯誤報告 ---\n {e}")
-                return {}
-        else:
-            logging.info("❌ 轉換失敗：從原始字串中無法解析出有效的 JSON 字典。")
-            return {}
-
         try:
+            llm_with_tools = get_langchain_gemini_pro().bind_tools(ALL_TOOLS)
+            response_message = await llm_with_tools.ainvoke(messages)
+            response_content = jsonlike_str_to_dict(response_message.content) # pyright: ignore[reportArgumentType]
+            
+            if response_content:
+                try:
+                    response_model = ToolCallDecision(**response_content)
+                    logging.info("--- ✅ ToolCallDecision 模型驗證成功！ ---")
+                except ValidationError as e:
+                    logging.error(f"❌ 驗證失敗！不符合 ToolCallDecision 模型的規範。\n--- 詳細錯誤報告 ---\n {e}")
+                    return {}
+            else:
+                logging.info("❌ 轉換失敗：從原始字串中無法解析出有效的 JSON 字典。")
+                return {}
+            
             thought = response_model.thought
             chosen_tool_name = response_model.tool_name
             tool_input = response_model.tool_input
