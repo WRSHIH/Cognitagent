@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# IDE and environment files
+.vscode/
+.idea/
+.env
+.env.*
+temp.env
+pytest.ini
+
+# Python cache and virtual environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+
+# Test files and directories
+tests/
+create_test_structure.py
+
+# Gradio cache
+.gradio/
+
+# Other artifacts
+Demo.png
+LICENSE
+README.md
