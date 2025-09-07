@@ -2,6 +2,7 @@ import gradio as gr
 import httpx
 import json
 import uuid
+import os
 
 # 後端 API 的位址
 API_URL = "http://127.0.0.1:8080/api/v1/chat/stream"
@@ -121,4 +122,6 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Agent UI") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(share=True)
+    server_port = int(os.environ.get("PORT", 8080))
+    demo.launch(server_name="0.0.0.0", server_port=server_port)
+    # demo.launch(share=True)
