@@ -15,7 +15,6 @@ from core.services import get_langchain_gemini_pro, get_langchain_gemini_flash, 
 from core.tool_registry import ALL_TOOLS
 from core.utils import load_prompt
 
-system_prompt_content = load_prompt("agent_system.txt") 
 
 # 狀態和結構的定義
 class RouteDecision(BaseModel):
@@ -525,12 +524,7 @@ def create_master_graph():
 if __name__ == "__main__":
     Actions = AgentNodes(max_replans=3, max_subgoal_retries=2, tools = ALL_TOOLS)
     Query_from_route = {"main_goal": "台北今天天氣", "route_decision": 'simple_query'}
-    After_executive_state = {'plan': HierarchicalPlan(main_goal="請分析比較 'Matrix-Game 2.0' 和 'Reinforcement Learning with Rubric Anchors' 這兩篇論文。", 
-                                                    sub_goals=[SubGoal(goal_id=1, description="使用 tavily_search 搜尋 Matrix-Game 2.0", dependencies=[], status='pending', raw_result=None, result_summary=''), 
-                                                               SubGoal(goal_id=2, description='總結搜尋結果', dependencies=[1], status='pending', raw_result=None, result_summary='')]), 
-                            'is_human_intervention_needed': False,
-                            "main_goal": "請分析比較 'Matrix-Game 2.0' 和 'Reinforcement Learning with Rubric Anchors' 這兩篇論文。",
-                            'current_sub_goal_id': 1,}
+    # asyncio.run(Actions.simple_query_executor_node(Query_from_route))
     
 
 

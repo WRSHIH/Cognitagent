@@ -46,9 +46,6 @@ class Settings(BaseSettings):
     # 知識回寫相關設定
     KNOWLEDGE_SIMILARITY_THRESHOLD: float = 0.95
 
-    # 網路搜尋相關設定
-    TAVILY_MAX_RESULTS: int = 1
-
     # Pydantic V2 的設定方式，指定 .env 檔案的編碼
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', case_sensitive=False)
 

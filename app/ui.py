@@ -122,6 +122,6 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Agent UI") as demo:
 
 
 if __name__ == "__main__":
-    server_port = int(os.environ.get("PORT", 8080))
-    demo.launch(server_name="0.0.0.0", server_port=server_port)
-    # demo.launch(share=True)
+    # server_port = int(os.environ.get("PORT", 8080))
+    # demo.launch(server_name="0.0.0.0", server_port=server_port)
+    demo.launch(share=True)
