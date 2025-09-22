@@ -64,7 +64,7 @@
 ## 🛠️ 技術架構與深度剖析 (Architecture & In-depth Analysis)
 本專案採用前後端分離、以 Agent 為核心的模組化架構。
 
-### 1. 系統架構圖
+### 1. 軟體系統架構圖
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F4F1DE', 'primaryTextColor': '#3D405B', 'lineColor': '#3D405B', 'textColor': '#3D405B', 'actorBorder': '#3D405B', 'actorBkg': '#F4F1DE'}}}%%
 graph TD
@@ -151,8 +151,71 @@ graph TD
     class Ingest,Docs,Config offlineStyle
 ```
 
+### 2. Multi-Agent 系統架構圖
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F4F1DE', 'primaryTextColor': '#3D405B', 'lineColor': '#3D405B', 'textColor': '#3D405B', 'actorBorder': '#3D405B', 'actorBkg': '#F4F1DE'}}}%%
+graph TD
+    subgraph "核心 Agent 工作流程"
+        direction TB
+        A_START([START]) --> B_ROUTER{1. Router<br>評估任務複雜度};
 
-### 2. 架構演進與關鍵權衡 (Architectural Evolution & Trade-offs)
+        subgraph "快速通道"
+            direction TB
+            C_SIMPLE[2a. Simple Executor<br>一次性回答或工具調用];
+        end
+
+        subgraph "DEHP 核心循環 (複雜任務)"
+            direction TB
+            D_PLANNER[2b. Meta Planner<br>生成/更新階層式計畫];
+            E_EXECUTIVE{3. Executive<br>評估計畫與決策};
+            F_EXECUTOR[4. Executor<br>選擇工具並組裝指令];
+            G_REFLECTOR{5. Reflector<br>審查結果與品質};
+            H_RETRY[6. Retry Handler<br>指數延遲後重試];
+        end
+        
+        I_SYNTHESIZER[7. Synthesizer<br>綜合記憶以生成最終報告];
+        J_HUMAN_INTERVENTION[🚨 Human Intervention<br>任務中止];
+        K_END([END]);
+
+        %% 流程連接
+        B_ROUTER -- "簡單查詢" --> C_SIMPLE;
+        B_ROUTER -- "複雜任務 / 知識進化" --> D_PLANNER;
+
+        C_SIMPLE --> K_END;
+
+        D_PLANNER --> E_EXECUTIVE;
+        
+        E_EXECUTIVE -- "CONTINUE<br>(計畫正常)" --> F_EXECUTOR;
+        E_EXECUTIVE -- "REPLAN<br>(計畫有缺陷)" --> D_PLANNER;
+        E_EXECUTIVE -- "SYNTHESIZE<br>(所有任務完成)" --> I_SYNTHESIZER;
+        
+        F_EXECUTOR --> G_REFLECTOR;
+
+        G_REFLECTOR -- "CONTINUE<br>(執行成功)" --> E_EXECUTIVE;
+        G_REFLECTOR -- "REPLAN<br>(邏輯性失敗)" --> D_PLANNER;
+        G_REFLECTOR -- "RETRY<br>(暫時性失敗)" --> H_RETRY;
+        G_REFLECTOR -- "ABORT / REPLAN Limit<br>(致命錯誤)" --> J_HUMAN_INTERVENTION;
+
+        H_RETRY --> F_EXECUTOR;
+        
+        I_SYNTHESIZER --> K_END;
+        J_HUMAN_INTERVENTION --> K_END;
+
+    end
+
+    %% 節點樣式
+    classDef startEnd fill:#3D405B,stroke:#F4F1DE,color:#F4F1DE;
+    classDef decision fill:#F2CC8F,stroke:#3D405B,stroke-width:2px;
+    classDef process fill:#81B29A,stroke:#3D405B,stroke-width:2px;
+    classDef error fill:#E07A5F,stroke:#3D405B,stroke-width:2px;
+
+    class A_START,K_END startEnd;
+    class B_ROUTER,E_EXECUTIVE,G_REFLECTOR decision;
+    class C_SIMPLE,D_PLANNER,F_EXECUTOR,H_RETRY,I_SYNTHESIZER process;
+    class J_HUMAN_INTERVENTION error;
+```
+
+### 3. 架構演進與關鍵權衡 (Architectural Evolution & Trade-offs)
 #### **主題一：從「線性工作流」到「自主 Agent 狀態機」的演進**
 * **背景：** 專案的核心目標是打造一個能「自我進化」的知識庫 AI。這不僅需要讀取資料 (RAG)，更需要 AI 能在對話中學習，並自主決定何時將新知「寫回」知識庫。
 * **權衡考量：**
