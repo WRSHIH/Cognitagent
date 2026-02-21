@@ -43,14 +43,7 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
       <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     </a>
   </p>
-
----
-<div align="center">
-  <img src="Demo.png" alt="Cognitagent Demo" width="800">
 </div>
-</div>
-
-
 ---
 
 ## 🎯 問題背景 (The Problem)
