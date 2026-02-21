@@ -140,10 +140,9 @@ The result: a knowledge base that **self-heals** — never frozen, never unbound
 
 ---
 
-## 🛠️ 技術架構與深度剖析 (Architecture & In-depth Analysis)
-本專案採用前後端分離、以 Agent 為核心的模組化架構。
+## System Architecture
 
-### 1. 軟體系統架構圖
+### 1. Service Topology
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F4F1DE', 'primaryTextColor': '#3D405B', 'lineColor': '#3D405B', 'textColor': '#3D405B', 'actorBorder': '#3D405B', 'actorBkg': '#F4F1DE'}}}%%
 graph TD
@@ -229,6 +228,7 @@ graph TD
     class Qdrant,GoogleAI,Tavily dataStyle
     class Ingest,Docs,Config offlineStyle
 ```
+The frontend and backend are fully decoupled. The Gradio UI communicates with FastAPI exclusively over HTTP, which means the frontend can be replaced — a Next.js SPA, a CLI client, a Slack bot — without touching agent logic. The agent core is similarly isolated: `main.py` calls `agent.invoke()` and is otherwise unaware of how the graph is constructed internally.
 
 ### 2. Multi-Agent 系統架構圖
 ```mermaid
