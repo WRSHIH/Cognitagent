@@ -2,7 +2,8 @@
   
   # **Cognitagent**
 
-  **一個基於 LangGraph 打造、具備自我進化能力的 Agentic AI 框架。它不僅是 RAG 的再進化，更是實現了知識的「自主寫回與精煉」閉環，目標是打造一個能與企業共同成長、甚至預測未來知識需求的「永續智慧體」。**
+**A self-evolving Agentic AI framework built on LangGraph.**  
+Beyond retrieval-augmented generation — a closed-loop system where knowledge writes itself back.
  
   <p>
     <!-- <a href="[CI Workflow 連結]">
