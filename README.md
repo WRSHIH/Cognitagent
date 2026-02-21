@@ -235,11 +235,11 @@ Cognitagent routes requests through a six-node LangGraph state machine. Simple f
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F4F1DE', 'primaryTextColor': '#3D405B', 'lineColor': '#3D405B', 'textColor': '#3D405B', 'actorBorder': '#3D405B', 'actorBkg': '#F4F1DE'}}}%%
 graph TD
-    subgraph "Agent workflow"
+    subgraph "Agent Workflow"
         direction TB
         A_START([START]) --> B_ROUTER{1. Router<br>};
 
-        subgraph "simple query"
+        subgraph
             direction TB
             C_SIMPLE[2a. Simple Executor<br>];
         end
@@ -258,8 +258,8 @@ graph TD
         K_END([END]);
 
         %% 流程連接
-        B_ROUTER -- "簡單查詢" --> C_SIMPLE;
-        B_ROUTER -- "複雜任務 / 知識進化" --> D_PLANNER;
+        B_ROUTER -- "Simple Query" --> C_SIMPLE;
+        B_ROUTER -- "Complex / Knowledge-Evolution " --> D_PLANNER;
 
         C_SIMPLE --> K_END;
 
