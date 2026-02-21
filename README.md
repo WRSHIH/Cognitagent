@@ -239,7 +239,7 @@ graph TD
         direction TB
         A_START([START]) --> B_ROUTER{1. Router<br>};
 
-        subgraph
+        subgraph "Simple Query"
             direction TB
             C_SIMPLE[2a. Simple Executor<br>];
         end
