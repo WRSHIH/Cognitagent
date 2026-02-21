@@ -294,48 +294,46 @@ graph TD
     class C_SIMPLE,D_PLANNER,F_EXECUTOR,H_RETRY,I_SYNTHESIZER process;
     class J_HUMAN_INTERVENTION error;
 ```
+Each node is a typed LangGraph node backed by a Pydantic-validated `AgentState` schema. State transitions are explicit and logged, giving full observability into every decision the agent makes without requiring an external tracing tool during development.
 
-### 3. 架構演進與關鍵權衡 (Architectural Evolution & Trade-offs)
-#### **主題一：從「線性工作流」到「自主 Agent 狀態機」的演進**
-* **背景：** 專案的核心目標是打造一個能「自我進化」的知識庫 AI。這不僅需要讀取資料 (RAG)，更需要 AI 能在對話中學習，並自主決定何時將新知「寫回」知識庫。
-* **權衡考量：**
-    * **方案 A (LlamaIndex + 傳統 LangChain Chains)：** 此方案將所有操作串接成一個固定的、線性的工作流 (Retrieve -> Synthesize -> Decide -> Write)。優點是結構簡單，開發初期容易理解與實現。缺點是極度僵化，AI 無法根據情境動態調整行為。例如，它無法在「查詢知識庫」和「上網搜尋」之間做出選擇，也無法在工具執行失敗後進行重試或選擇替代方案。
-    * **方案 B (LlamaIndex + LangChain + LangGraph)：** 此方案引入 LangGraph 將 Agent 建構成一個狀態機 (State Machine)。優點是賦予了 Agent 真正的自主判斷能力。它可以在圖 (Graph) 的節點之間迴圈、設立條件分支，並根據當前對話狀態，從多個工具中動態選擇最合適的一個執行。這完美地滿足了專案對「自主進化」的需求。缺點是初期學習曲線較陡峭，且對話流程的管理變得更為複雜。
+---
 
-* **最終決策：** 堅定地選擇 **LangGraph**。因為專案的靈魂在於 AI 的「自主性」與「動態決策」。一個固定的線性鏈無法承載一個能夠思考、規劃、並從錯誤中調整的智慧體。LangGraph 提供的迴圈與條件判斷能力，是實現「知識進化閉環」不可或缺的基石。方案。
+## Repository Layout
 
-* **反思與學習：** 這次架構升級讓我深刻體會到，打造高級 AI 系統的關鍵，已從「編排固定的工作流」轉變為 **「設計一個具備決策能力的智慧代理」**。
+```
+Cognitagent/
+│
+├── main.py                       # FastAPI application entry point
+├── requirements.txt              # Pinned Python dependencies
+├── pytest.ini                    # pytest configuration
+├── Dockerfile                    # Backend container image
+├── frontend.Dockerfile           # Gradio frontend container image
+├── temp.env                      # Environment variable template → copy to .env
+├── create_test_structure.py      # Test fixture scaffolding helper
+│
+├── app/
+│   └── ui.py                     # Gradio interface; SSE streaming to FastAPI
+│
+├── core/                         # All business logic — no framework leakage
+│   ├── agent.py                  # LangGraph state machine definition
+│   ├── tool_registry.py          # Dynamic tool registration and dispatch
+│   ├── config.py                 # Pydantic settings; loaded from .env
+│   └── tools/
+│       ├── rag_tool.py           # Semantic vector search over Qdrant
+│       ├── web_search.py         # Tavily Search API wrapper
+│       └── knowledge_writer.py   # Atomize–Retrieve–Merge pipeline (core R&D)
+│
+├── prompts/                      # Versioned prompt templates (Jinja2 / plaintext)
+│   └── *.jinja2 / *.txt          # One file per agent node / tool role
+│
+├── script/
+│   └── ingest.py                 # Offline document ingestion and embedding
+│
+├── source_docs/                  # Place PDF / MD / TXT files here for ingestion
+│
+└── tests/
+    ├── unit/                     # Isolated module tests; all LLM calls mocked
+    └── integration/              # End-to-end API and state-machine tests
+```
 
-#### **主題二：打造知識庫的「自愈」與「進化」機制**
-
-* **克服的最大挑戰:**
-    * 在開發核心的 **「知識寫入與融合」模組**：如何設計一個可靠的AI決策流程，來判斷新知識應該被「新增」、「更新」還是「忽略」。起初我嘗試使用簡單的向量相似度比對，若相似度高於閾值就直接覆蓋。但這導致了大量有價值的細節在更新中遺失，或是產生了許多高度重複但略有差異的資訊片段。
-
-    * 實現 **「原子化-比對-融合」** 演算法：
-      * 原子化 (Atomize): 先將新知識塊透過 LLM 分解成最小的、獨立的「原子事實」單元。
-      * 比對 (Retrieve): 對每一個原子事實，在向量資料庫中檢索最相似的現有知識節點。
-      * 融合 (Merge): 如果找到高度相似的節點，我會啟用一個專門的「融合 Prompt」，讓 LLM 扮演知識編輯的角色，將新舊兩個版本的資訊智能地合併成一個更完整、更準確的「合併版本」。
-      * 決策 (Decide): 只有當「合併版本」與「舊版本」在語意上有顯著差異時，系統才會執行「刪除舊節點並插入新節點」的更新操作，否則將跳過以避免冗餘。
-
-* **這次經歷讓我學到：** 建立一個可靠的自主 AI 系統，關鍵不在於單一的、強大的 Prompt，而在於為 AI 設計一套穩健的、具備多重檢查與平衡的決策框架。將複雜任務分解，並為每個子任務設計專門的 AI 角色，是確保最終輸出品質與可靠性的不二法門。
-
-* **目前的已知限制:**
-    * LLM 決策的不可靠性：核心的「知識融合」過程高度依賴 LLM 的判斷力。雖然目前的 Prompt 工程已相當穩健，但在面對模稜兩可或高度專業的知識時，LLM 仍可能做出次優的合併決策。系統目前缺少一個「人類在環」(Human-in-the-loop) 的審核機制來校準這些關鍵決策。
-    * 測試的侷限性：儘管專案擁有涵蓋率頗高的單元與整合測試，但這些測試大量依賴對 LLM API 的 Mock。這意味著測試能驗證程式碼的邏輯路徑是否正確，卻無法真正評估 AI 在真實場景下生成內容的「品質」。建立一套可靠的 AI 輸出 E2E 評估框架，是專案後續的重要課題。
-<!--
-## 🚀 快速啟動與測試 (Quick Start & Testing)
-
-### 環境需求
-* Docker & Docker Compose v2.0+
-* Go 1.21+
-* Node.js 20+
-
-### 一鍵啟動
-```bash
-# 複製專案並進入目錄
-git clone [https://github.com/](https://github.com/)[使用者名稱]/[倉庫名稱].git
-cd [倉庫名稱]
-
-# 啟動所有服務
-docker-compose up --build
--->
+---
