@@ -43,28 +43,13 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
       <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     </a>
   </p>
+
+---
+<div align="center">
+  <img src="Demo.png" alt="Cognitagent Demo" width="800">
+</div>
 </div>
 
-<!-- <p align="center">
-  <a href="[你的線上 Demo 連結]"><strong>🚀 互動式線上 Demo</strong></a>
-  &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
-  <a href="[你的 Loom 導覽影片連結]"><strong>🎬 觀看 2 分鐘導覽影片</strong></a>
-  &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
-  <a href="[你的技術部落格文章連結]"><strong>✍️ 深入閱讀設計思路</strong></a>
-</p> -->
-
-<!-- <div align="center">
-  <img src="[此處放置最能代表專案核心功能的 GIF 動圖或高品質截圖]" alt="專案核心功能展示">
-</div> -->
-<!-- 
-內容： 這個 GIF 應該要能在 15 秒內完整展示核心價值。例如：
-
-提問 A：「什麼是 LangGraph？」 -> Agent 從知識庫回答。
-
-提供新知：「LangGraph 是由 LangChain 團隊開發的...它特別適合需要 agentic reasoning loop 的場景。」 -> Agent 執行 SaveNewKnowledgeTool，顯示知識已更新。
-
-再次提問 A：「什麼是 LangGraph？」 -> Agent 給出了一個更豐富、更準確的新答案。
--->
 
 ---
 
