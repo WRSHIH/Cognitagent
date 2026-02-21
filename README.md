@@ -335,5 +335,151 @@ Cognitagent/
     ├── unit/                     # Isolated module tests; all LLM calls mocked
     └── integration/              # End-to-end API and state-machine tests
 ```
+All production logic lives under `core/`. The directory enforces a strict dependency boundary: `main.py` and `app/` call into `core/`, but `core/` imports nothing from either. The agent logic is independently testable, importable, and reusable across deployment surfaces.
 
 ---
+
+## Getting Started
+
+### Prerequisites
+
+| Dependency | Minimum Version | Purpose |
+|---|---|---|
+| Python | 3.10 | Runtime |
+| Docker & Docker Compose | 24.0 | Containerized deployment *(optional)* |
+| Qdrant | Cloud or self-hosted | Vector database |
+| Google AI API key | — | Gemini LLM and text embeddings |
+| Tavily API key | — | Web search tool |
+
+---
+
+### Local Setup
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/WRSHIH/Cognitagent.git
+cd Cognitagent
+```
+
+**2. Create a virtual environment and install dependencies**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**3. Configure environment variables**
+
+```bash
+cp temp.env .env
+# Open .env in your editor and fill in the required keys
+```
+
+**4. Ingest your documents**
+
+Place PDF, Markdown, or plain-text files into `source_docs/`, then run:
+
+```bash
+python script/ingest.py
+```
+
+**5. Start the services**
+
+```bash
+# Terminal 1 — FastAPI backend (default: http://localhost:8000)
+python main.py
+
+# Terminal 2 — Gradio frontend (default: http://localhost:7860)
+python app/ui.py
+```
+
+Open `http://localhost:7860` in your browser to begin.
+
+---
+
+### Docker Deployment
+
+```bash
+# Build images
+docker build -t cognitagent-backend  -f Dockerfile          .
+docker build -t cognitagent-frontend -f frontend.Dockerfile  .
+
+# Run (requires a populated .env file)
+docker run -d --env-file .env -p 8000:8000 cognitagent-backend
+docker run -d --env-file .env -p 7860:7860 cognitagent-frontend
+```
+
+For production deployments, compose all three services — backend, frontend, and Qdrant — in a single `docker-compose.yml` with a shared bridge network. Services communicate by container name rather than `localhost`, which requires no additional networking configuration.
+
+---
+
+## Configuration Reference
+
+Copy `temp.env` to `.env` and populate every field. The file is listed in `.gitignore`; never commit credentials to version control.
+
+```dotenv
+# ── Google AI ──────────────────────────────────────────────────────────────
+GOOGLE_API_KEY=your_google_ai_api_key
+GEMINI_MODEL=gemini-2.5-flash or gemini-2.5-pro
+
+# ── Qdrant ─────────────────────────────────────────────────────────────────
+QDRANT_URL=https://your-cluster.qdrant.io
+QDRANT_API_KEY=your_qdrant_api_key
+QDRANT_COLLECTION_NAME=cognitagent_kb      # created automatically on first ingest
+
+# ── Tavily Web Search ───────────────────────────────────────────────────────
+TAVILY_API_KEY=your_tavily_api_key
+
+# ── Agent Behavior ──────────────────────────────────────────────────────────
+MAX_RETRY_ATTEMPTS=3                       # maximum retries per Executor invocation
+KNOWLEDGE_MERGE_THRESHOLD=0.85            # cosine similarity gate for merge vs. insert (0–1)
+```
+
+`KNOWLEDGE_MERGE_THRESHOLD` is the most consequential tuning knob. Higher values (e.g., `0.92`) make the merge gate stricter — more facts are inserted as new nodes rather than merged. Lower values (e.g., `0.75`) cause more aggressive merging, which risks collapsing genuinely distinct facts. The default of `0.85` performs well across general enterprise knowledge bases.
+
+---
+
+## Ingesting Documents into the Knowledge Base
+
+`script/ingest.py` reads source files from `source_docs/`, chunks them, embeds each chunk via the Google AI Embeddings API, and upserts the resulting vectors into Qdrant. The script is idempotent: it checksums each source file and skips re-ingestion of unchanged content.
+
+**Supported formats:**
+
+| Format | Extension | Chunking Strategy |
+|---|---|---|
+| PDF | `.pdf` | Paragraph-aware; preserves page boundaries |
+| Markdown | `.md` | Splits on heading boundaries |
+| Plain text | `.txt` | Fixed-size windows with configurable overlap |
+
+**Example run:**
+
+```bash
+$ python script/ingest.py
+
+[INFO]  Processing: technical_spec_v3.pdf   (18 pages)
+[INFO]  Generated 94 chunks → embedded → stored ✓
+[INFO]  Processing: onboarding_guide.md
+[INFO]  Generated 31 chunks → embedded → stored ✓
+[INFO]  Skipping:   annual_report_2023.pdf   (unchanged, checksum match)
+[INFO]  Ingestion complete. Active vectors: 2,847
+```
+
+> **Cost note.** Embedding large document sets consumes Google AI API quota proportional to token count. Run `ingest.py` during off-peak hours and monitor usage in the Google Cloud console before processing very large corpora.
+
+---
+
+## License
+
+Distributed under the [MIT License](LICENSE). You are free to use, copy, modify, and distribute this software provided the original copyright notice is retained.
+
+---
+
+<div align="center">
+
+*Built by [WRSHIH](https://github.com/WRSHIH)*
+
+If this project is useful to you, a ⭐ helps others find it.
+
+</div>
