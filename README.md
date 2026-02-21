@@ -47,26 +47,26 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
 
 ---
 
-## Table of Contents
+## Motivation
 
-- [Motivation](#motivation)
-- [Core Innovation: The Atomize–Retrieve–Merge Algorithm](#core-innovation-the-atomizeretrievemerge-algorithm)
-- [System Architecture](#system-architecture)
-  - [Service Topology](#service-topology)
-  - [Agent State Machine](#agent-state-machine)
-- [Repository Layout](#repository-layout)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Local Setup](#local-setup)
-  - [Docker Deployment](#docker-deployment)
-- [Configuration Reference](#configuration-reference)
-- [Ingesting Documents into the Knowledge Base](#ingesting-documents-into-the-knowledge-base)
-- [Running the Test Suite](#running-the-test-suite)
-- [Engineering Deep-Dive](#engineering-deep-dive)
-  - [Why LangGraph over Linear Chains?](#why-langgraph-over-linear-chains)
-  - [The Knowledge Fusion Problem](#the-knowledge-fusion-problem)
-  - [Known Limitations and Roadmap](#known-limitations-and-roadmap)
-- [License](#license)
+Enterprise AI systems share a structural flaw: they accumulate knowledge at ingestion time and then freeze it.
+
+Every conventional RAG deployment creates a **static snapshot** of the organization's knowledge. The moment that snapshot is taken, it begins to decay. Information retrieved from last quarter's reports answers questions about last quarter — not today. Keeping the knowledge base current demands continuous, expensive human curation: re-embedding documents, managing deletions, reconciling contradictions. Most teams simply don't keep up, and the knowledge base drifts further from reality over time, eroding both the accuracy of AI responses and user trust.
+
+This is the **Knowledge Entropy Problem**: the tendency of static knowledge stores to degrade in relevance as the world moves on around them.
+
+```
+Traditional RAG Lifecycle
+
+  Documents ──→ Embed ──→ Store ──→ Retrieve ──→ Generate
+                  ▲
+          [knowledge frozen here]
+          Accuracy decays with every passing day.
+          Maintenance cost compounds continuously.
+```
+
+Cognitagent breaks the freeze. Rather than treating the knowledge base as a read-only index, Cognitagent treats it as a **living asset** — one that the agent actively reads from and writes back to. Every conversation, every web-search result, and every newly discovered fact becomes an opportunity to refine what the system knows. The curation burden shifts from human annotators to the agent itself.
+
 
 ---
 
