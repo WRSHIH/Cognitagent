@@ -228,19 +228,20 @@ graph TD
     class Qdrant,GoogleAI,Tavily dataStyle
     class Ingest,Docs,Config offlineStyle
 ```
-The frontend and backend are fully decoupled. The Gradio UI communicates with FastAPI exclusively over HTTP, which means the frontend can be replaced — a Next.js SPA, a CLI client, a Slack bot — without touching agent logic. The agent core is similarly isolated: `main.py` calls `agent.invoke()` and is otherwise unaware of how the graph is constructed internally.
 
-### 2. Multi-Agent 系統架構圖
+### 2. Agent State Machine
+Cognitagent routes requests through a six-node LangGraph state machine. Simple factual queries short-circuit to a single-call executor. Complex tasks — including all knowledge-evolution operations — are dispatched into the full DEHP planning loop (Decompose → Execute → Heal → Produce).
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F4F1DE', 'primaryTextColor': '#3D405B', 'lineColor': '#3D405B', 'textColor': '#3D405B', 'actorBorder': '#3D405B', 'actorBkg': '#F4F1DE'}}}%%
 graph TD
-    subgraph "核心 Agent 工作流程"
+    subgraph "Agent workflow"
         direction TB
-        A_START([START]) --> B_ROUTER{1. Router<br>評估任務複雜度};
+        A_START([START]) --> B_ROUTER{1. Router<br>};
 
-        subgraph "快速通道"
+        subgraph "simple query"
             direction TB
-            C_SIMPLE[2a. Simple Executor<br>一次性回答或工具調用];
+            C_SIMPLE[2a. Simple Executor<br>];
         end
 
         subgraph "DEHP 核心循環 (複雜任務)"
