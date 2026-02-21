@@ -244,17 +244,17 @@ graph TD
             C_SIMPLE[2a. Simple Executor<br>];
         end
 
-        subgraph "DEHP 核心循環 (複雜任務)"
+        subgraph "Hierarchical Task Graph"
             direction TB
-            D_PLANNER[2b. Meta Planner<br>生成/更新階層式計畫];
-            E_EXECUTIVE{3. Executive<br>評估計畫與決策};
-            F_EXECUTOR[4. Executor<br>選擇工具並組裝指令];
-            G_REFLECTOR{5. Reflector<br>審查結果與品質};
-            H_RETRY[6. Retry Handler<br>指數延遲後重試];
+            D_PLANNER[2b. Meta Planner<br>];
+            E_EXECUTIVE{3. Executive<br>};
+            F_EXECUTOR[4. Executor<br>];
+            G_REFLECTOR{5. Reflector<br>};
+            H_RETRY[6. Retry Handler<br>];
         end
         
-        I_SYNTHESIZER[7. Synthesizer<br>綜合記憶以生成最終報告];
-        J_HUMAN_INTERVENTION[🚨 Human Intervention<br>任務中止];
+        I_SYNTHESIZER[7. Synthesizer<br>];
+        J_HUMAN_INTERVENTION[Human Intervention<br>];
         K_END([END]);
 
         %% 流程連接
@@ -265,16 +265,16 @@ graph TD
 
         D_PLANNER --> E_EXECUTIVE;
         
-        E_EXECUTIVE -- "CONTINUE<br>(計畫正常)" --> F_EXECUTOR;
-        E_EXECUTIVE -- "REPLAN<br>(計畫有缺陷)" --> D_PLANNER;
-        E_EXECUTIVE -- "SYNTHESIZE<br>(所有任務完成)" --> I_SYNTHESIZER;
+        E_EXECUTIVE -- "CONTINUE<br>" --> F_EXECUTOR;
+        E_EXECUTIVE -- "REPLAN<br>" --> D_PLANNER;
+        E_EXECUTIVE -- "SYNTHESIZE<br>" --> I_SYNTHESIZER;
         
         F_EXECUTOR --> G_REFLECTOR;
 
-        G_REFLECTOR -- "CONTINUE<br>(執行成功)" --> E_EXECUTIVE;
-        G_REFLECTOR -- "REPLAN<br>(邏輯性失敗)" --> D_PLANNER;
-        G_REFLECTOR -- "RETRY<br>(暫時性失敗)" --> H_RETRY;
-        G_REFLECTOR -- "ABORT / REPLAN Limit<br>(致命錯誤)" --> J_HUMAN_INTERVENTION;
+        G_REFLECTOR -- "CONTINUE<br>" --> E_EXECUTIVE;
+        G_REFLECTOR -- "REPLAN<br>" --> D_PLANNER;
+        G_REFLECTOR -- "RETRY<br>" --> H_RETRY;
+        G_REFLECTOR -- "ABORT / REPLAN Limit<br>" --> J_HUMAN_INTERVENTION;
 
         H_RETRY --> F_EXECUTOR;
         
