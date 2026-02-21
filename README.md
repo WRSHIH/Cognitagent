@@ -11,6 +11,12 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
     </a> -->
     <!-- <a href="[Codecov 連結]">
       <img src="https://img.shields.io/codecov/c/github/[使用者名稱]/[倉庫名稱]" alt="程式碼覆蓋率">
+    <a href="[你的部署狀態連結，例如 Vercel]">
+      <img src="https://img.shields.io/badge/deployment-online-brightgreen" alt="部署狀態">
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/github/license/wrshih/cognitagent" alt="授權條款">
+    </a>
     </a> -->
     <a href="https://www.python.org/">
       <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -35,12 +41,6 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
     </a>
     <a href="Dockerfile">
       <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
-    </a>
-    <a href="[你的部署狀態連結，例如 Vercel]">
-      <img src="https://img.shields.io/badge/deployment-online-brightgreen" alt="部署狀態">
-    </a>
-    <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/wrshih/cognitagent" alt="授權條款">
     </a>
   </p>
 </div>
