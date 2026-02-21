@@ -70,23 +70,75 @@ Cognitagent breaks the freeze. Rather than treating the knowledge base as a read
 
 ---
 
-## 🎯 問題背景 (The Problem)
+## Core Innovation: The Atomize–Retrieve–Merge Algorithm
 
-在當今以數據驅動決策的商業環境中，企業的**集體智慧（Collective Intelligence**正迅速成為其核心競爭力。然而，現有的知識管理系統，包括主流的 RAG AI 應用，都面臨一個根本性的瓶頸：**知識熵增定律**。
+The `knowledge_writer` tool implements Cognitagent's primary research contribution: an LLM-driven four-phase pipeline that decides — with high fidelity — whether new information should update the knowledge base and precisely *how* that update should be structured.
 
-資訊被提取後便迅速過時，形成一個只能「讀取」的靜態時間切片。這不僅導致 AI 回應的準確性與信任度持續衰減，更嚴重的是，它讓整個知識庫從一個潛在的「智慧資產」退化為一個需要高昂人力成本來對抗其腐化的「數據負債」。
+### Phase 1 — Atomize
 
-我深刻體會到這種持續的資訊衰退不僅是技術問題，更是對企業創新速度與決策品質的隱性拖累。因此，我決心打造一個能打破此熵增循環、實現知識自主進化的 Agentic AI 框架。
+Raw input (dialogue context, web-search snippet, uploaded document) is decomposed by an LLM into the smallest semantically self-contained units: **atomic facts**. Each atomic fact carries a single, verifiable claim with no implicit dependencies.
 
-這個專案不僅僅是一個概念驗證，而是一個以企業級標準打造的解決方案。從一開始，我就將模組化架構、全面的單元與整合測試 (tests/)，以及容器化的 DevOps 流程 (Dockerfile) 視為核心，旨在將一個前瞻性的 AI 願景，建立在穩固且可維護的工程基礎之上。
+```
+Input: "As of Q1 2025, Cognitagent v2 added support for OpenAI-compatible
+        endpoints and reduced mean latency to 420 ms on the standard benchmark."
 
-## ✨ 核心價值與功能 (Core Value & Features)
+Atomic Facts:
+  [A]  Cognitagent v2 was released in Q1 2025.
+  [B]  Cognitagent v2 supports OpenAI-compatible endpoints.
+  [C]  Cognitagent v2 achieves 420 ms mean latency on the standard benchmark.
+```
 
-本專案的核心價值是提供**自主進化、企業級就緒的 Agentic AI 框架，將靜態的知識庫轉變為動態的智慧資產**。主要功能包括：
+Atomization prevents the aliasing problem: a dense paragraph cannot be meaningfully compared against isolated vector nodes. Atomic facts can.
 
-* **知識進化閉環 (Knowledge Evolution Loop)**：透過獨創的「原子化-比對-融合」流程，Agent 能自主地將對話或外部搜尋中獲得的新知寫回核心知識庫。此自動化機制取代了數小時甚至數日的人工更新，從根本上解決了傳統 RAG 系統的資訊過時與知識熵增問題。
-* **可擴展的 Agentic 核心架構**：基於 LangGraph 的狀態機設計，Agent 能進行多步推理與工具的迴圈調用，而非線性地執行任務。開發者只需專注於工具的實現，即可無縫擴充 Agent 的能力（如網路搜尋、知識庫查詢等），預計可將新功能的整合效率提升 90% 以上。
-* **生產環境就緒 (Production-Ready) 的工程實踐**：專案採用 API 優先的解耦設計 (FastAPI + Gradio)，並整合了全面的單元與整合測試 (pytest) 及容器化部署 (Dockerfile)，確保了系統在生產環境下的高可靠性、可維護性與可擴展性。
+### Phase 2 — Retrieve
+
+For each atomic fact, a semantic vector search against Qdrant returns the nearest existing knowledge node. The retrieval threshold is configurable via `KNOWLEDGE_MERGE_THRESHOLD`.
+
+- **Above threshold** → candidate for merge (proceed to Phase 3).
+- **Below threshold** → no conflict; the fact is a genuine addition (skip to Phase 4, INSERT path).
+
+### Phase 3 — Merge
+
+A dedicated merge prompt presents both the incoming atomic fact and the retrieved node to the LLM, instructing it to act as a **knowledge editor**: produce a single, maximally informative unified statement that supersedes both inputs. The merge prompt explicitly surfaces temporal markers, quantitative values, and qualifiers to prevent silent data loss.
+
+```
+Incoming:  "Cognitagent v2 achieves 420 ms mean latency (Q1 2025 benchmark)."
+Existing:  "Cognitagent v1 achieves 610 ms mean latency (Q3 2024 benchmark)."
+
+Merged:    "Cognitagent reduced mean latency from 610 ms (v1, Q3 2024)
+            to 420 ms (v2, Q1 2025) on the standard benchmark."
+```
+
+### Phase 4 — Decide
+
+The merged output is embedded and compared against the original retrieved node. If the semantic distance exceeds a significance threshold, the system executes an **atomic swap**: delete the stale node, insert the merged node. If the distance is negligible — meaning the merge produced no informational gain — the operation is skipped entirely. This guards against write amplification and vector store bloat.
+
+```
+          New atomic fact
+               │
+               ▼
+      [Phase 1: Atomize]
+               │
+   ┌─── for each atom ───┐
+   │  [Phase 2: Retrieve]│
+   └──────┬──────┬───────┘
+          │      │
+  sim > τ │      │ sim ≤ τ
+          │      └──────────────────────────────→ INSERT (new node)
+          ▼
+  [Phase 3: Merge]
+          │
+  [Phase 4: Decide]
+          │
+  Δsem > ε│      Δsem ≤ ε
+          │      └──────────────────────────────→ SKIP (no-op)
+          ▼
+  DELETE old node + INSERT merged node
+```
+
+The result: a knowledge base that **self-heals** — never frozen, never unbounded, never internally inconsistent.
+
+---
 
 ## 🛠️ 技術架構與深度剖析 (Architecture & In-depth Analysis)
 本專案採用前後端分離、以 Agent 為核心的模組化架構。
