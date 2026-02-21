@@ -44,6 +44,30 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
     </a>
   </p>
 </div>
+
+---
+
+## Table of Contents
+
+- [Motivation](#motivation)
+- [Core Innovation: The Atomize–Retrieve–Merge Algorithm](#core-innovation-the-atomizeretrievemerge-algorithm)
+- [System Architecture](#system-architecture)
+  - [Service Topology](#service-topology)
+  - [Agent State Machine](#agent-state-machine)
+- [Repository Layout](#repository-layout)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Local Setup](#local-setup)
+  - [Docker Deployment](#docker-deployment)
+- [Configuration Reference](#configuration-reference)
+- [Ingesting Documents into the Knowledge Base](#ingesting-documents-into-the-knowledge-base)
+- [Running the Test Suite](#running-the-test-suite)
+- [Engineering Deep-Dive](#engineering-deep-dive)
+  - [Why LangGraph over Linear Chains?](#why-langgraph-over-linear-chains)
+  - [The Knowledge Fusion Problem](#the-knowledge-fusion-problem)
+  - [Known Limitations and Roadmap](#known-limitations-and-roadmap)
+- [License](#license)
+
 ---
 
 ## 🎯 問題背景 (The Problem)
