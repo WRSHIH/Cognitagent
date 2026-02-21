@@ -15,6 +15,27 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
     <a href="https://www.python.org/">
       <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     </a>
+    <a href="https://langchain-ai.github.io/langgraph/">
+      <img src="https://img.shields.io/badge/LangGraph-0.2%2B-1C3C3C?style=flat-square&logo=langchain&logoColor=white" alt="LangGraph">
+    </a>
+    <a href="https://fastapi.tiangolo.com/">
+      <img src="https://img.shields.io/badge/FastAPI-0.111%2B-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+    </a>
+    <a href="https://www.gradio.app/">
+      <img src="https://img.shields.io/badge/Gradio-4.x-FF7C00?style=flat-square" alt="Gradio">
+    </a>
+    <a href="https://qdrant.tech/">
+      <img src="https://img.shields.io/badge/Qdrant-vector--db-DC143C?style=flat-square" alt="Qdrant">
+    </a>
+    <a href="https://ai.google.dev/">
+      <img src="https://img.shields.io/badge/Google%20Gemini-LLM%20%26%20Embeddings-4285F4?style=flat-square&logo=google&logoColor=white" alt="Gemini">
+    </a>
+    <a href="tests/">
+      <img src="https://img.shields.io/badge/tests-pytest-brightgreen?style=flat-square&logo=pytest" alt="Tests">
+    </a>
+    <a href="Dockerfile">
+      <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+    </a>
     <a href="[你的部署狀態連結，例如 Vercel]">
       <img src="https://img.shields.io/badge/deployment-online-brightgreen" alt="部署狀態">
     </a>
