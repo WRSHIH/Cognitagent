@@ -12,6 +12,7 @@ Beyond retrieval-augmented generation — a closed-loop system where knowledge w
     <!-- <a href="[Codecov 連結]">
       <img src="https://img.shields.io/codecov/c/github/[使用者名稱]/[倉庫名稱]" alt="程式碼覆蓋率">
     </a> -->
+    [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
     <a href="[你的部署狀態連結，例如 Vercel]">
       <img src="https://img.shields.io/badge/deployment-online-brightgreen" alt="部署狀態">
     </a>
